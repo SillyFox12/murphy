@@ -1,0 +1,7 @@
+mediapipe
+opencv-python
+pyaudio
+numpy
+scikit-learn
+pyqt5
+
