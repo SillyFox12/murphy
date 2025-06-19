@@ -1,6 +1,7 @@
 #Necessary dependencies
 import csv
 import os
+import time
 
 import cv2 # Make sure opencv-python is installed: pip install opencv-python
 
@@ -41,11 +42,26 @@ class Webcam:
             #Check if the default webcam is opened successfully
             if not cap.isOpened():
                 print("Error: Could not open video source.")
-                return
+                exit()
+            # If the default webcam is opened successfully, show the live feed
+            print("Using default webcam.")
+            while True:
+                ret, frame = cap.read()
+                if not ret:
+                    print("Error: Stream unavailable.")
+                    break
+
+                cv2.imshow('Webcam Feed', frame)
+                if cv2.waitKey(1) & 0xFF == ord('e'):
+                    break
+             #Cancel the live feed by pressing 'e' and close the window
+            print("Exiting live feed.")   
+            cap.release()
+            cv2.destroyAllWindows()
         else:
             # If a video source is provided, use it
             print(f"Using video source: {video_source}")
             # Check if the video source is opened successfully
             if not cap.isOpened():
                 print(f"Error: Could not open video source {video_source}.")
-                return
+                exit()
