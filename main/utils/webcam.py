@@ -1,7 +1,5 @@
 #Necessary dependencies
-import csv
 import os
-import time
 
 import cv2 # Make sure opencv-python is installed: pip install opencv-python
 

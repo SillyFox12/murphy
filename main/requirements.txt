@@ -1,6 +1,8 @@
 mediapipe
 opencv-python
-pyaudio
+moviepy
+sounddevice
+libsndfile
 numpy
 scikit-learn
 pyqt5
