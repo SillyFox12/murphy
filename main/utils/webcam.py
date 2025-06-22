@@ -1,31 +1,21 @@
 #Necessary dependencies
 import os
-
+from dir_manager import DirectoryCreator as dc
 import cv2 # Make sure opencv-python is installed: pip install opencv-python
 
 
 #Extracts frames from the webcam and saves them as images 
 class Webcam:
-    def __init__(self, video_source, output_dir: str):
+    def __init__(self, video_source, dir_manager: dc):
         # Initialize the webcam with the given parameters
         self.video_source = video_source
-        self.output_dir = output_dir
-        print(f"Initializing Webcam with video_source={video_source}, output_dir={output_dir}")
-        self.ensure_directory(self.output_dir)
-
-    #Create output directory if it does not exist
-    @staticmethod
-    def ensure_directory(path=None):
-        if not path:
-            output_dir = "./data"
-            path = output_dir
-        else:
-            output_dir = path
-        try:
-            os.makedirs(path, exist_ok=True)
-        except OSError as e:
-            print(f"Error creating directory {path}: {e}")
-            raise
+        # Use DirectoryCreator to ensure the output directory exists
+        self.output_dir = dir_manager.get_output_dir()
+        # Print the initialization parameters for debugging
+        print(f"Initializing Webcam with video_source={video_source}, output_dir={self.output_dir}")
+        
+      
+    
 
     #Decides whether to use the webcam or a video file as the source
     def get_video_capture(self):
@@ -82,11 +72,5 @@ class Webcam:
         cap = self.get_video_capture()
         self.frame_extractor(cap)
 
-cam = Webcam(video_source="C:\\Users\\My_ka\\code\\murphy\\main\\training\\test.mp4", output_dir="data")  # Use webcam
+cam = Webcam(video_source=0, dir_manager=dc())
 cam.run()
-
-# OR for a video file:
-# cam = Webcam(video_source="my_video.mp4", output_dir="data")
-# cam.run()
-
-
