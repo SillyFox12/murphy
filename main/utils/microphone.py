@@ -5,15 +5,15 @@ import queue
 import sys
 from dir_manager import DirectoryCreator as dc
 # Necessary dependencies for audio extraction
-#from moviepy.editor import VideoFileClip
+from moviepy import VideoFileClip 
 import sounddevice as sd
 import soundfile as sf
 
-#Extracts audio from a video file and saves it as a WAV file
+# Extracts audio from a video file and saves it as a WAV file
 class Microphone:
-    
-    #Initialize the Microphone class with video file and output directory
-    def __init__(self, video_source,  dir_manager: dc):
+
+    # Initialize the Microphone class with video file and output directory
+    def __init__(self, video_source, dir_manager: dc):
         self.video_source = video_source
         # Ensure the output directory exists
         self.output_dir = dir_manager.get_output_dir()
@@ -39,24 +39,35 @@ class Microphone:
 
     #Records audio from the microphone and saves it to a file
     def record(self):
-        self.setup_audio()
-        try:
-            if self.samplerate is None:
-                device_info = sd.query_devices(self.device, 'input')
-                self.samplerate = int(device_info['default_samplerate'])
+        if not self.video_source:
+            print("No video source provided. Recording audio from the microphone.")
+            self.setup_audio()
+            try:
+                if self.samplerate is None:
+                    device_info = sd.query_devices(self.device, 'input')
+                    self.samplerate = int(device_info['default_samplerate'])
 
-            with sf.SoundFile(self.filename, mode='x', samplerate=self.samplerate,
-                              channels=self.channels, subtype=self.subtype) as file:
-                with sd.InputStream(samplerate=self.samplerate, device=self.device,
-                                    channels=self.channels, callback=self.callback):
-                    print("Recording... Press Ctrl+C to stop.")
-                    while True:
-                        file.write(self.q.get())
-        except KeyboardInterrupt:
-            print("\nRecording stopped. File saved as:", self.filename)
-        except Exception as e:
-            print("An error occurred:", str(e))
-        
+                with sf.SoundFile(self.filename, mode='x', samplerate=self.samplerate,
+                                channels=self.channels, subtype=self.subtype) as file:
+                    with sd.InputStream(samplerate=self.samplerate, device=self.device,
+                                        channels=self.channels, callback=self.callback):
+                        print("Recording... Press Ctrl+C to stop.")
+                        while True:
+                            file.write(self.q.get())
+            except KeyboardInterrupt:
+                print("\nRecording stopped. File saved as:", self.filename)
+            except Exception as e:
+                print("An error occurred:", str(e))
+        else:
+            print(f"Video source provided: {self.video_source}. Extracting audio from video.")
+            #Load the video file
+            video = VideoFileClip(self.video_source)
+            # Extract audio from the video file
+            audio = video.audio
+            # Save the audio to a WAV file
+            audio_file_path = os.path.join(self.output_dir, 'extracted_audio.wav')
+            audio.write_audiofile(audio_file_path, codec='pcm_s16le')
+            print(f"Audio extracted and saved to {audio_file_path}")
 
-mic = Microphone(video_source=None, dir_manager=dc())
+mic = Microphone(video_source="./main/training/test.mp4", dir_manager=dc())
 mic.record()
