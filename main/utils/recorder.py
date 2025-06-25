@@ -1,4 +1,3 @@
-# ffmpeg_recorder.py
 import subprocess
 import os
 from dir_manager import DirectoryCreator
@@ -6,9 +5,8 @@ from device_select import DeviceLister
 
 class AVRecorder:
     #Initialize arguments
-    def __init__(self, video_device: str, audio_device: str, dir_manager : DirectoryCreator, framerate=30, duration=None):
-        self.video_device = video_device
-        self.audio_device = audio_device
+    def __init__(self, video_device: DeviceLister, audio_device: DeviceLister, dir_manager : DirectoryCreator, framerate=30, duration=None):
+        self.video_device, self.audio_device = DeviceLister.get_default_devices()
         self.output_dir = dir_manager.get_output_dir()
         self.framerate = framerate
         self.duration = duration  # in seconds (optional)
@@ -40,9 +38,10 @@ class AVRecorder:
 
 if __name__ == "__main__":
    dir_mgr = DirectoryCreator(output_dir="./data")
+   video, audio = DeviceLister.get_default_devices()
    recorder = AVRecorder(
-       video_device="HP HD Camera",
-       audio_device="Internal Microphone (Conexant ISST Audio)",
+       video_device=video,
+       audio_device=audio,
        dir_manager=dir_mgr,
        framerate=30,
        duration=10

@@ -53,5 +53,5 @@ class Microphone:
     def stop(self):
         print("\nRecording stopped. File saved as:", self.filename)
 
-mic = Microphone(video_source=None, dir_manager=dc())
+mic = Microphone(video_source="./data/test_recording.mp4", dir_manager=dc())
 mic.record()
