@@ -1,10 +1,10 @@
 #Necessary dependencies
 import os
-from dir_manager import DirectoryCreator as dc
+from .dir_manager import DirectoryCreator as dc
 import cv2 # Make sure opencv-python is installed: pip install opencv-python
 
 #Extracts frames from the webcam and saves them as images 
-class Webcam:
+class FrameExtractor:
     def __init__(self, video_source, dir_manager: dc):
         # Initialize the webcam with the given parameters
         self.video_source = video_source

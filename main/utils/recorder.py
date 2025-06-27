@@ -1,7 +1,7 @@
 import subprocess
 import os
-from dir_manager import DirectoryCreator
-from device_select import DeviceLister
+from .dir_manager import DirectoryCreator
+from .device_select import DeviceLister
 
 class AVRecorder:
     #Initialize arguments
@@ -46,4 +46,3 @@ if __name__ == "__main__":
        framerate=30,
        duration=10
    )
-   recorder.record(filename="test_recording")

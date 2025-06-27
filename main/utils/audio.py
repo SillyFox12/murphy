@@ -3,7 +3,7 @@ import os
 import tempfile
 import queue
 import sys
-from dir_manager import DirectoryCreator as dc
+from .dir_manager import DirectoryCreator as dc
 # Necessary dependencies for audio extraction
 from moviepy import VideoFileClip 
 import sounddevice as sd
@@ -38,7 +38,7 @@ class Microphone:
         self.q.put(indata.copy())
 
     #Records audio from the microphone and saves it to a file
-    def record(self):
+    def extract_audio(self):
             print(f"Video source provided: {self.video_source}. Extracting audio from video.")
             #Load the video file
             video = VideoFileClip(self.video_source)
@@ -53,5 +53,3 @@ class Microphone:
     def stop(self):
         print("\nRecording stopped. File saved as:", self.filename)
 
-mic = Microphone(video_source="./data/test_recording.mp4", dir_manager=dc())
-mic.record()
