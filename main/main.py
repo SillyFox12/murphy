@@ -14,7 +14,8 @@ from utils import AVRecorder, Microphone, DirectoryCreator, DeviceLister, FrameE
 
 
 # Preproccessing modules
-from preprocessing.handtracker import HandTracker
+import preprocessing
+from preprocessing import HandTracker, LandmarkLogger
 
 # Record a performance using AVRecorder
 def record_performance(filename="performance", duration=10):
@@ -46,10 +47,12 @@ def analyze_video():
     output_dir = dir_mgr.get_output_dir()
     image_paths = sorted(glob.glob(f'{output_dir}/*.jpg'))
     tracker = HandTracker()
+    logger = LandmarkLogger(output_dir=output_dir)
+    logger.write_header()
 
     print(f"[INFO] Analyzing {len(image_paths)} frames for hand posture...")
 
-    for img_path in image_paths:
+    for frame_num, img_path in enumerate(image_paths):
         frame = cv2.imread(img_path)
         if frame is None:
             print(f"[WARN] Could not read {img_path}, skipping.")
@@ -58,11 +61,13 @@ def analyze_video():
         frame, results = tracker.process_frame(frame)
         tracker.display_frame(frame, results)
 
+        logger.save_landmarks(frame_num, results)
+
         if tracker.exit():
             break
 
     tracker.cleanup()
-    print(f"[INFO] Finished analyzing {len(image_paths)} frames.")
+    print(f"[INFO] Finished analyzing {len(image_paths)} frames. Saved to {logger.filepath}")
 
 #Main execution pipeline
 def main():
