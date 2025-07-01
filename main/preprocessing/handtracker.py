@@ -27,5 +27,6 @@ class HandTracker:
     def exit(self):
         return cv2.waitKey(1) & 0xFF == ord('q')
 
+    #Closes the viewing window
     def cleanup(self):
         cv2.destroyAllWindows()

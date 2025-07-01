@@ -1,7 +1,9 @@
+#Import the necessary dependencies
 import subprocess
 import os
 from .dir_manager import DirectoryCreator
 from .device_select import DeviceLister
+
 
 class AVRecorder:
     #Initialize arguments
@@ -36,6 +38,7 @@ class AVRecorder:
         print(" ".join(command))
         subprocess.run(" ".join(command), shell=True)
 
+#For creating mp4 video without other processes
 if __name__ == "__main__":
    dir_mgr = DirectoryCreator(output_dir="./data")
    video, audio = DeviceLister.get_default_devices()
