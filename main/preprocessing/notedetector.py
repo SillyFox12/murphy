@@ -1,7 +1,7 @@
-from unittest import result
-import numpy as np
-import librosa
-from scipy.spatial.distance import cosine
+# Necessary Dependencies
+import numpy as np # For manipulating information
+import librosa # For analyzing the audio
+from scipy.spatial.distance import cosine # For cosine similarity 
 from typing import List, Dict, Any, Tuple, Optional, Set
 import csv
 
@@ -15,7 +15,7 @@ class AnalysisConfig:
                  hop_length: int = 1024,
                  fmin: float = librosa.note_to_hz('C2'),
                  fmax: float = librosa.note_to_hz('C7')):
-        self.sr = sr
+        self.sr = sr #Sampling rate
         self.frame_size = frame_size
         self.hop_length = hop_length
         # Frequency range for pYIN pitch detection
@@ -34,7 +34,8 @@ class ChordRecognizer:
     CHORD_TEMPLATES: Dict[str, np.ndarray] = {
         'N.C.': np.array([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), # No Chord
         # Major Chords (Root, Major Third, Perfect Fifth)
-        'C':    np.array([1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0]),
+        # Each element of the array represents the semitones from the root
+        'C':    np.array([1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0]), # ([C, C#, D, D#, E, F, F#, G, G#, A, A#, B])
         'C#':   np.array([0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0]),
         'D':    np.array([0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0]),
         'D#':   np.array([0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0]),
@@ -62,7 +63,7 @@ class ChordRecognizer:
     }
     
     def __init__(self, chroma_threshold: float = 0.85):
-        #Initializes the chord recognizer
+        # Initializes the chord recognizer.
         self.chroma_threshold = chroma_threshold
 
     def find_best_match(self, chroma_vector: np.ndarray) -> str:
@@ -75,15 +76,18 @@ class ChordRecognizer:
         Returns:
             The name of the best-matched chord or 'N.C.' (No Chord).
         """
+        # If no chord is present, then 'N.C' is outputted.
         if not np.any(chroma_vector):
              return 'N.C.'
 
         best_match = 'N.C.'
+        # Set to -1 to ensure the rist comparison succeeds as 1 - cosine(x) can never be -1
         max_similarity = -1.0
         
-        # We use cosine similarity, which is robust to volume changes
+        # Use cosine similarity to determine similarity of detected chord to ideal chord.
         for name, template in self.CHORD_TEMPLATES.items():
-            similarity = 1 - cosine(chroma_vector, template)
+            # Determines how similar extracted chromogram is to the ideal.
+            similarity = 1 - cosine(chroma_vector, template) 
             if similarity > max_similarity:
                 max_similarity = similarity
                 best_match = name
@@ -94,7 +98,7 @@ class ChordRecognizer:
 
 class AudioAnalyzer:
     """
-    A robust and efficient audio analyzer for pitch and chord detection.
+    Audio analyzer for pitch and chord detection.
     """
     def __init__(self, config: AnalysisConfig = AnalysisConfig()):
         self.config = config
@@ -146,8 +150,7 @@ class AudioAnalyzer:
             
             # Use chroma features to determine polyphony
             chroma_frame = chromagram[:, i]
-            # A simple but more robust heuristic: if more than 2 chroma bins are strong,
-            # it's likely a chord.
+           # If more than 2 chroma bins are strong, it's likely a chord.
             is_polyphonic = np.sum(chroma_frame > 0.4) > 2
 
             event = {
