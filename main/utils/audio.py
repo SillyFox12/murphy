@@ -56,3 +56,7 @@ class Microphone:
     def stop(self):
         print("\nRecording stopped. File saved as:", self.filename)
 
+    # Returns the output directory for the audio files
+    def get_output_dir(self):
+        return self.audio_dir
+

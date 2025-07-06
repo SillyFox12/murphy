@@ -81,3 +81,7 @@ class FrameExtractor:
     def record(self):
         self.cap = self.get_video_capture()
         self.frame_extractor(self.cap)
+
+    # Get the output directory for the extracted frames
+    def get_output_dir(self):
+        return self.video_subdir
