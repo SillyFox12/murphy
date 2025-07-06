@@ -243,4 +243,3 @@ if __name__ == '__main__':
     # Export to CSV
     AudioAnalyzer.export_to_csv(analysis_results, output_path="./data/pitch_chord_analysis.csv")
     
-    # Expected output should show a 'C' chord followed by a 'G' pitch.

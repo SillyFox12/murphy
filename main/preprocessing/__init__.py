@@ -1,3 +1,3 @@
 from .handtracker import HandTracker
 from .landmark import LandmarkLogger
-from .notedetector import NoteDetector
+from .notedetector import AudioAnalyzer

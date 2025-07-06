@@ -15,7 +15,7 @@ from utils import AVRecorder, Microphone, DirectoryCreator, DeviceLister, FrameE
 
 # Preprocessing modules
 import preprocessing
-from preprocessing import HandTracker, LandmarkLogger
+from preprocessing import HandTracker, LandmarkLogger, AudioAnalyzer
 
 # Record a performance using AVRecorder
 def record_performance(filename="performance", duration=10):
@@ -36,7 +36,7 @@ def record_performance(filename="performance", duration=10):
 def extract_audio(video_path, dir_mgr):
     mic = Microphone(video_source=video_path, dir_manager=dir_mgr)
     mic.extract_audio()
-    return os.path.join(mic.get_output_dir(), "extracted_audio.wav")
+    return mic
 
 def extract_frames(video_path, dir_mgr):
     video = FrameExtractor(video_source=video_path, dir_manager=dir_mgr)
@@ -69,19 +69,42 @@ def analyze_video():
     tracker.cleanup()
     print(f"[INFO] Finished analyzing {len(image_paths)} frames. Saved to {logger.filepath}")
 
+# Detect notes and chords in the audio
+def detect_notes_and_chords(mic):
+    analyzer = AudioAnalyzer()
+    # Ensure the audio file exists
+    audio_path = os.path.join(mic.get_output_dir(), "extracted_audio.wav")
+
+    if not os.path.exists(audio_path):
+        print(f"[WARN] Audio file not found: {audio_path}")
+        return
+
+    # Compiles the audio analysis results
+    analysis_results = analyzer.analyze_audio(audio_path)
+
+    # Print the results as a csv file
+    output_csv = os.path.join(mic.get_output_dir(), "pitch_chord_analysis.csv")
+    analyzer.export_to_csv(analysis_results, output_path=output_csv)
+
+
+
+
 #Main execution pipeline
 def main():
     print("[STEP 1] Recording performance...")
     video_path, dir_mgr = record_performance(filename="test_recording", duration=10)
 
     print("[STEP 2] Extracting audio from recording...")
-    audio_path = extract_audio(video_path, dir_mgr)
+    mic = extract_audio(video_path, dir_mgr)
 
     print("[Step 3] Extracting the frames from the recording...")
     extract_frames(video_path, dir_mgr)
     
     print("[STEP 3] Analyzing hand movement and posture...")
     analyze_video()
+
+    print("[STEP 4] Detecting notes and chords in the audio...")
+    detect_notes_and_chords(mic)
 
     print("[✅ DONE] Feedback system completed successfully.")
 
