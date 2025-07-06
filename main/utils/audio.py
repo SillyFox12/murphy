@@ -18,11 +18,14 @@ class Microphone:
         # Ensure the output directory exists
         self.output_dir = dir_manager.get_output_dir()
         print(f"Initializing Microphone with video_source={video_source}, output_dir={self.output_dir}")
+        # Create a subdirectory for audio files
+        self.audio_dir = os.path.join(self.output_dir, "audio")
+        os.makedirs(self.audio_dir, exist_ok=True)
 
     # Set up the audio recording parameters
     def setup_audio(self):
         filename = f"recording_{next(tempfile._get_candidate_names())}.wav"
-        self.filename = os.path.join(self.output_dir, filename)
+        self.filename = os.path.join(self.audio_dir, filename)
 
         self.channels = 1
         self.device = None  # default input
@@ -45,7 +48,7 @@ class Microphone:
             # Extract audio from the video file
             audio = video.audio
             # Save the audio to a WAV file
-            audio_file_path = os.path.join(self.output_dir, 'extracted_audio.wav')
+            audio_file_path = os.path.join(self.audio_dir, 'extracted_audio.wav')
             audio.write_audiofile(audio_file_path, codec='pcm_s16le')
             print(f"Audio extracted and saved to {audio_file_path}")
     

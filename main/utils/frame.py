@@ -12,7 +12,10 @@ class FrameExtractor:
         self.output_dir = dir_manager.get_output_dir()
         # Print the initialization parameters for debugging
         print(f"Initializing Webcam with video_source={video_source}, output_dir={self.output_dir}")
-    
+        # Video subdirectory for storing frames
+        self.video_subdir = os.path.join(self.output_dir, "frames")
+        os.makedirs(self.video_subdir, exist_ok=True)
+
     #Decides whether to use the webcam or a video file as the source
     def get_video_capture(self):
         #video_source can be a webcam index (0 for the default webcam) or a video file path
@@ -32,7 +35,7 @@ class FrameExtractor:
         # Capture frames from the webcam or video file
         self.running = True
         # Ensure the output directory exists
-        output_dir = self.output_dir
+        output_dir = self.video_subdir
         current_frame = 0
         print(f"Extracting frames from {self.video_source} and saving them to {self.output_dir}")
 
