@@ -36,7 +36,7 @@ def record_performance(filename="performance", duration=10):
 def extract_audio(video_path, dir_mgr):
     mic = Microphone(video_source=video_path, dir_manager=dir_mgr)
     mic.extract_audio()
-    return os.path.join(dir_mgr.get_output_dir(), "extracted_audio.wav")
+    return os.path.join(mic.get_output_dir(), "extracted_audio.wav")
 
 def extract_frames(video_path, dir_mgr):
     video = FrameExtractor(video_source=video_path, dir_manager=dir_mgr)
@@ -44,10 +44,10 @@ def extract_frames(video_path, dir_mgr):
 
 #STEP 3: Analyze the saved frames using MediaPipe
 def analyze_video():
-    output_dir = dir_mgr.get_output_dir()
-    image_paths = sorted(glob.glob(f'{output_dir}/*.jpg'))
+    video = FrameExtractor(video_source=None, dir_manager=dir_mgr)
+    image_paths = sorted(glob.glob(f'{video.get_output_dir()}/*.jpg'))
     tracker = HandTracker()
-    logger = LandmarkLogger(output_dir=output_dir)
+    logger = LandmarkLogger(output_dir=video.get_output_dir())
     logger.write_header()
 
     print(f"[INFO] Analyzing {len(image_paths)} frames for hand posture...")
