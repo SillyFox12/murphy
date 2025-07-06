@@ -6,8 +6,8 @@ from .device_select import DeviceLister
 
 
 class AVRecorder:
-    #Initialize arguments
-    def __init__(self, video_device: DeviceLister, audio_device: DeviceLister, dir_manager : DirectoryCreator, framerate=30, duration=None):
+    # Initialize arguments
+    def __init__(self, video_device: DeviceLister, audio_device: DeviceLister, dir_manager: DirectoryCreator, framerate=30, duration=None):
         self.video_device, self.audio_device = DeviceLister.get_default_devices()
         self.output_dir = dir_manager.get_output_dir()
         self.framerate = framerate
@@ -17,7 +17,7 @@ class AVRecorder:
         video_input = f'video="{self.video_device}"'
         audio_input = f'audio="{self.audio_device}"'
         output_file = os.path.join(self.output_dir, f"{filename}.mp4")
-        #Arra containing the elements of the ffmpeg command.
+        # Array containing the elements of the ffmpeg command.
         cmd = [
             "ffmpeg",
             "-f", "dshow",

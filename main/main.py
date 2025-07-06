@@ -13,14 +13,14 @@ import utils
 from utils import AVRecorder, Microphone, DirectoryCreator, DeviceLister, FrameExtractor
 
 
-# Preproccessing modules
+# Preprocessing modules
 import preprocessing
 from preprocessing import HandTracker, LandmarkLogger
 
 # Record a performance using AVRecorder
 def record_performance(filename="performance", duration=10):
     global dir_mgr
-    dir_mgr = DirectoryCreator(output_dir="./data")
+    dir_mgr = DirectoryCreator(base_dir="./data")
     video_device, audio_device = DeviceLister.get_default_devices()
 
     recorder = AVRecorder(
