@@ -27,7 +27,7 @@ class PerformanceAnalyzer:
         self.video_path = os.path.join(self.dir_mgr.get_output_dir(), f"{self.filename}.mp4")
 
     def _record_performance(self) -> None:
-        # This method remains the same.
+        # Record the performance using the AVRecorder.
         print("--- [STEP 1] Recording Performance ---")
         video_device, audio_device = DeviceLister.get_default_devices()
         recorder = AVRecorder(
@@ -41,8 +41,8 @@ class PerformanceAnalyzer:
 
 
     def _run_audio_analysis_process(self) -> None:
-        """Target for the audio analysis process."""
-        pid = os.getpid()
+        # Extract audio and analyze it in a separate process.
+        pid = os.getpid() # Get the process ID for logging
         print(f"[Audio Process PID: {pid}] Starting audio analysis...")
 
         mic = Microphone(video_source=self.video_path, dir_manager=self.dir_mgr)
@@ -50,24 +50,22 @@ class PerformanceAnalyzer:
         audio_path = os.path.join(mic.get_output_dir(), "extracted_audio.wav")
         print(f"[Audio Process PID: {pid}] Audio extracted.")
 
-        # Pass the optimized parameters to your analyzer
-        # NOTE: This assumes your AudioAnalyzer can accept a config object or parameters.
-        # You may need to adapt your AudioAnalyzer.__init__ method.
+        # Initialize the AudioAnalyzer with the provided configuration.
         analyzer = AudioAnalyzer(config=self.config)
         analysis_results = analyzer.analyze_audio(audio_path)
 
-
+        # Export the analysis results to a CSV file.
         output_csv = os.path.join(mic.get_output_dir(), "pitch_chord_analysis.csv")
         analyzer.export_to_csv(analysis_results, output_path=output_csv)
         print(f"[Audio Process PID: {pid}] Analysis complete.")
 
     def _run_video_analysis_process(self) -> None:
-        """
-        Target for the video analysis process with OPTIMIZED frame sampling.
-        """
-        pid = os.getpid()
+        # Analyze the video in a separate process.
+        # This process will only analyze frames at specified intervals to optimize performance.
+        pid = os.getpid() # Get the process ID for logging
         print(f"[Video Process PID: {pid}] Starting optimized video analysis...")
 
+        # Reads the vide file and processes it frame by frame in the system's memory.
         cap = cv2.VideoCapture(self.video_path)
         if not cap.isOpened():
             print(f"[Video Process PID: {pid}] [ERROR] Could not open video: {self.video_path}", file=sys.stderr)
@@ -85,7 +83,6 @@ class PerformanceAnalyzer:
                 if not ret:
                     break
 
-                # --- THE CORE OPTIMIZATION ---
                 # Only process the frame if it's on the specified interval.
                 if frame_num % self.config.frame_analysis_interval == 0:
                     _, results = tracker.process_frame(frame)
@@ -103,7 +100,7 @@ class PerformanceAnalyzer:
             tracker.cleanup()
 
     def run_pipeline(self) -> None:
-        """Executes the entire optimized pipeline."""
+        """Executes the entire pipeline."""
         start_time = time.time()
         
         self._record_performance()
