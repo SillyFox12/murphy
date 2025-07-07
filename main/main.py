@@ -1,114 +1,141 @@
 # ------------------------- #
-# main_pipeline.py
+# main_pipeline_optimized.py
 # ------------------------- #
 
-# Necessary dependencies
-import sys
 import os
-import glob
+import sys
 import cv2
+import time
+from multiprocessing import Process
+from typing import List, Dict, Any
 
-# Custom utility modules
-import utils
-from utils import AVRecorder, Microphone, DirectoryCreator, DeviceLister, FrameExtractor
-
-
-# Preprocessing modules
-import preprocessing
-from preprocessing import HandTracker, LandmarkLogger, AudioAnalyzer
-
-# Record a performance using AVRecorder
-def record_performance(filename="performance", duration=10):
-    global dir_mgr
-    dir_mgr = DirectoryCreator(base_dir="./data")
-    video_device, audio_device = DeviceLister.get_default_devices()
-
-    recorder = AVRecorder(
-        video_device=video_device,
-        audio_device=audio_device,
-        dir_manager=dir_mgr,
-        duration=duration
-    )
-    recorder.record(filename=filename)
-    return os.path.join(dir_mgr.get_output_dir(), f"{filename}.mp4"), dir_mgr
-
-# Extract audio from the video using Microphone class
-def extract_audio(video_path, dir_mgr):
-    mic = Microphone(video_source=video_path, dir_manager=dir_mgr)
-    mic.extract_audio()
-    return mic
-
-def extract_frames(video_path, dir_mgr):
-    video = FrameExtractor(video_source=video_path, dir_manager=dir_mgr)
-    video.record()
-
-#STEP 3: Analyze the saved frames using MediaPipe
-def analyze_video():
-    video = FrameExtractor(video_source=None, dir_manager=dir_mgr)
-    image_paths = sorted(glob.glob(f'{video.get_output_dir()}/*.jpg'))
-    tracker = HandTracker()
-    logger = LandmarkLogger(output_dir=video.get_output_dir())
-    logger.write_header()
-
-    print(f"[INFO] Analyzing {len(image_paths)} frames for hand posture...")
-
-    for frame_num, img_path in enumerate(image_paths):
-        frame = cv2.imread(img_path)
-        if frame is None:
-            print(f"[WARN] Could not read {img_path}, skipping.")
-            continue
-
-        frame, results = tracker.process_frame(frame)
-        tracker.display_frame(frame, results)
-
-        logger.save_landmarks(frame_num, results)
-
-        if tracker.exit():
-            break
-
-    tracker.cleanup()
-    print(f"[INFO] Finished analyzing {len(image_paths)} frames. Saved to {logger.filepath}")
-
-# Detect notes and chords in the audio
-def detect_notes_and_chords(mic):
-    analyzer = AudioAnalyzer()
-    # Ensure the audio file exists
-    audio_path = os.path.join(mic.get_output_dir(), "extracted_audio.wav")
-
-    if not os.path.exists(audio_path):
-        print(f"[WARN] Audio file not found: {audio_path}")
-        return
-
-    # Compiles the audio analysis results
-    analysis_results = analyzer.analyze_audio(audio_path)
-
-    # Print the results as a csv file
-    output_csv = os.path.join(mic.get_output_dir(), "pitch_chord_analysis.csv")
-    analyzer.export_to_csv(analysis_results, output_path=output_csv)
+# Assume your custom modules are imported here.
+# Mocks are used for demonstration.
+from utils import AVRecorder, Microphone, DirectoryCreator, DeviceLister
+from preprocessing import HandTracker, LandmarkLogger, AudioAnalyzer, AnalysisConfig
 
 
+class PerformanceAnalyzer:
+    """
+    An optimized, parallel pipeline for recording and analyzing performances.
+    """
+    def __init__(self, filename: str, duration: int, base_dir: str = "./data", config: AnalysisConfig = AnalysisConfig()):
+        self.filename = filename
+        self.duration = duration
+        self.config = config
+        self.dir_mgr = DirectoryCreator(base_dir=base_dir)
+        self.video_path = os.path.join(self.dir_mgr.get_output_dir(), f"{self.filename}.mp4")
+
+    def _record_performance(self) -> None:
+        # This method remains the same.
+        print("--- [STEP 1] Recording Performance ---")
+        video_device, audio_device = DeviceLister.get_default_devices()
+        recorder = AVRecorder(
+            video_device=video_device,
+            audio_device=audio_device,
+            dir_manager=self.dir_mgr,
+            duration=self.duration
+        )
+        recorder.record(filename=self.filename)
+        print(f"[✅] Performance recorded to: {self.video_path}")
 
 
-#Main execution pipeline
-def main():
-    print("[STEP 1] Recording performance...")
-    video_path, dir_mgr = record_performance(filename="test_recording", duration=10)
+    def _run_audio_analysis_process(self) -> None:
+        """Target for the audio analysis process."""
+        pid = os.getpid()
+        print(f"[Audio Process PID: {pid}] Starting audio analysis...")
 
-    print("[STEP 2] Extracting audio from recording...")
-    mic = extract_audio(video_path, dir_mgr)
+        mic = Microphone(video_source=self.video_path, dir_manager=self.dir_mgr)
+        mic.extract_audio()
+        audio_path = os.path.join(mic.get_output_dir(), "extracted_audio.wav")
+        print(f"[Audio Process PID: {pid}] Audio extracted.")
 
-    print("[Step 3] Extracting the frames from the recording...")
-    extract_frames(video_path, dir_mgr)
-    
-    print("[STEP 3] Analyzing hand movement and posture...")
-    analyze_video()
+        # Pass the optimized parameters to your analyzer
+        # NOTE: This assumes your AudioAnalyzer can accept a config object or parameters.
+        # You may need to adapt your AudioAnalyzer.__init__ method.
+        analyzer = AudioAnalyzer(config=self.config)
+        analysis_results = analyzer.analyze_audio(audio_path)
 
-    print("[STEP 4] Detecting notes and chords in the audio...")
-    detect_notes_and_chords(mic)
 
-    print("[✅ DONE] Feedback system completed successfully.")
+        output_csv = os.path.join(mic.get_output_dir(), "pitch_chord_analysis.csv")
+        analyzer.export_to_csv(analysis_results, output_path=output_csv)
+        print(f"[Audio Process PID: {pid}] Analysis complete.")
 
-# Python entry point
+    def _run_video_analysis_process(self) -> None:
+        """
+        Target for the video analysis process with OPTIMIZED frame sampling.
+        """
+        pid = os.getpid()
+        print(f"[Video Process PID: {pid}] Starting optimized video analysis...")
+
+        cap = cv2.VideoCapture(self.video_path)
+        if not cap.isOpened():
+            print(f"[Video Process PID: {pid}] [ERROR] Could not open video: {self.video_path}", file=sys.stderr)
+            return
+
+        tracker = HandTracker()
+        logger = LandmarkLogger(output_dir=self.dir_mgr.get_output_dir())
+        logger.write_header()
+        
+        frame_num = 0
+        processed_count = 0
+        try:
+            while cap.isOpened():
+                ret, frame = cap.read()
+                if not ret:
+                    break
+
+                # --- THE CORE OPTIMIZATION ---
+                # Only process the frame if it's on the specified interval.
+                if frame_num % self.config.frame_analysis_interval == 0:
+                    _, results = tracker.process_frame(frame)
+                    logger.save_landmarks(frame_num, results)
+                    processed_count += 1
+                
+                frame_num += 1
+            
+            total_frames = frame_num
+            print(f"[Video Process PID: {pid}] Analyzed {processed_count} frames out of {total_frames} total.")
+            print(f"[Video Process PID: {pid}] Analysis complete. Results saved to {logger.filepath}")
+
+        finally:
+            cap.release()
+            tracker.cleanup()
+
+    def run_pipeline(self) -> None:
+        """Executes the entire optimized pipeline."""
+        start_time = time.time()
+        
+        self._record_performance()
+        
+        print("\n--- [STEP 2] Starting Parallel Optimized Analysis ---")
+
+        audio_process = Process(target=self._run_audio_analysis_process)
+        video_process = Process(target=self._run_video_analysis_process)
+
+        audio_process.start()
+        video_process.start()
+        audio_process.join()
+        video_process.join()
+        
+        end_time = time.time()
+        print(f"\n[✅ DONE] Feedback system completed successfully in {end_time - start_time:.2f} seconds.")
+
+
 if __name__ == "__main__":
-    main()
+    FILENAME = "test_performance"
+    DURATION_SECONDS = 10
+    
+    # Create a config with our desired optimizations
+    # Let's target a 5x reduction in video frames and use a lower audio sample rate.
+    optimized_config = AnalysisConfig(
+        frame_analysis_interval=5,
+        audio_sr=16000
+    )
 
+    pipeline = PerformanceAnalyzer(
+        filename=FILENAME,
+        duration=DURATION_SECONDS,
+        config=optimized_config
+    )
+    pipeline.run_pipeline()

@@ -1,93 +1,99 @@
+# -*- coding: utf-8 -*-
 # Necessary Dependencies
-import numpy as np # For manipulating information
-import librosa # For analyzing the audio
-from scipy.spatial.distance import cosine # For cosine similarity 
-from typing import List, Dict, Any, Tuple, Optional, Set
+import numpy as np
+import librosa
+from scipy.spatial.distance import cosine
+from typing import List, Dict, Any, Optional
 import csv
 
 # --- Configuration ---
 
 class AnalysisConfig:
-    """Encapsulates all analysis parameters for clarity and ease of use."""
-    def __init__(self, 
-                 sr: int = 22050, 
-                 frame_size: int = 4096, 
-                 hop_length: int = 1024,
-                 fmin: float = librosa.note_to_hz('C2'),
-                 fmax: float = librosa.note_to_hz('C7')):
-        self.sr = sr #Sampling rate
-        self.frame_size = frame_size
-        self.hop_length = hop_length
-        # Frequency range for pYIN pitch detection
-        self.fmin = fmin
-        self.fmax = fmax
+    """A centralized configuration object for the entire analysis pipeline."""
+    def __init__(self,
+                 frame_analysis_interval: int = 5,
+                 # --- Audio Parameters ---
+                 audio_sr: int = 22050,
+                 audio_hop_length: int = 1024,
+                 audio_frame_size: int = 4096,
+                 audio_fmin: float = librosa.note_to_hz('C2'),
+                 audio_fmax: float = librosa.note_to_hz('C7')):
+        """
+        Args:
+            frame_analysis_interval (int): Interval for video frame analysis.
+            audio_sr (int): Sample rate for audio analysis. Lower is faster.
+            audio_hop_length (int): Hop length for STFT. Higher is faster.
+            audio_frame_size (int): FFT window size.
+            audio_fmin (float): Minimum frequency for pitch detection (pYIN).
+            audio_fmax (float): Maximum frequency for pitch detection (pYIN).
+        """
+        if frame_analysis_interval < 1:
+            raise ValueError("frame_analysis_interval must be 1 or greater.")
+        
+        # --- Core Attributes ---
+        self.frame_analysis_interval = frame_analysis_interval
+        self.audio_sr = audio_sr
+        self.audio_hop_length = audio_hop_length
+        self.audio_frame_size = audio_frame_size
+        self.audio_fmin = audio_fmin
+        self.audio_fmax = audio_fmax
+        
+        # --- Aliases for librosa compatibility ---
+        # This simplifies calls to librosa functions.
+        self.sr = self.audio_sr
+        self.hop_length = self.audio_hop_length
+        self.frame_size = self.audio_frame_size
+        self.fmin = self.audio_fmin
+        self.fmax = self.audio_fmax
 
 # --- Chord Recognition Module ---
 
 class ChordRecognizer:
-    """
-    Recognizes chords from chroma features using template matching.
-    """
+    """Recognizes chords from chroma features using template matching."""
     NOTE_NAMES: List[str] = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
     
-    # Scalable and clear chord templates. Represented as binary chroma vectors.
     CHORD_TEMPLATES: Dict[str, np.ndarray] = {
-        'N.C.': np.array([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), # No Chord
-        # Major Chords (Root, Major Third, Perfect Fifth)
-        # Each element of the array represents the semitones from the root
-        'C':    np.array([1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0]), # ([C, C#, D, D#, E, F, F#, G, G#, A, A#, B])
-        'C#':   np.array([0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0]),
-        'D':    np.array([0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0]),
-        'D#':   np.array([0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0]),
-        'E':    np.array([0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1]),
-        'F':    np.array([1, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0]),
-        'F#':   np.array([0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0]),
-        'G':    np.array([0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 1]),
-        'G#':   np.array([1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0]),
-        'A':    np.array([0, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0]),
-        'A#':   np.array([0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0]),
-        'B':    np.array([0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 1]),
-        # Minor Chords (Root, Minor Third, Perfect Fifth)
+        'N.C.': np.array([0]*12),
+        # Major Chords
+        'C':    np.array([1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0]),
+        'C#':   np.roll(np.array([1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0]), 1),
+        'D':    np.roll(np.array([1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0]), 2),
+        'D#':   np.roll(np.array([1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0]), 3),
+        'E':    np.roll(np.array([1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0]), 4),
+        'F':    np.roll(np.array([1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0]), 5),
+        'F#':   np.roll(np.array([1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0]), 6),
+        'G':    np.roll(np.array([1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0]), 7),
+        'G#':   np.roll(np.array([1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0]), 8),
+        'A':    np.roll(np.array([1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0]), 9),
+        'A#':   np.roll(np.array([1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0]), 10),
+        'B':    np.roll(np.array([1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0]), 11),
+        # Minor Chords
         'Cm':   np.array([1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0]),
-        'C#m':  np.array([0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0]),
-        'Dm':   np.array([0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0]),
-        'D#m':  np.array([0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0]),
-        'Em':   np.array([0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1]),
-        'Fm':   np.array([1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0]),
-        'F#m':  np.array([0, 1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0]),
-        'Gm':   np.array([0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 1, 0]),
-        'G#m':  np.array([0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 1]),
-        'Am':   np.array([1, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0]),
-        'A#m':  np.array([0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0]),
-        'Bm':   np.array([0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1]),
+        'C#m':  np.roll(np.array([1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0]), 1),
+        'Dm':   np.roll(np.array([1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0]), 2),
+        'D#m':  np.roll(np.array([1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0]), 3),
+        'Em':   np.roll(np.array([1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0]), 4),
+        'Fm':   np.roll(np.array([1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0]), 5),
+        'F#m':  np.roll(np.array([1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0]), 6),
+        'Gm':   np.roll(np.array([1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0]), 7),
+        'G#m':  np.roll(np.array([1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0]), 8),
+        'Am':   np.roll(np.array([1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0]), 9),
+        'A#m':  np.roll(np.array([1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0]), 10),
+        'Bm':   np.roll(np.array([1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0]), 11),
     }
     
     def __init__(self, chroma_threshold: float = 0.85):
-        # Initializes the chord recognizer.
         self.chroma_threshold = chroma_threshold
 
     def find_best_match(self, chroma_vector: np.ndarray) -> str:
-        """
-        Finds the best matching chord for a given chroma vector.
-
-        Args:
-            chroma_vector: A 12-element array representing musical note energy.
-
-        Returns:
-            The name of the best-matched chord or 'N.C.' (No Chord).
-        """
-        # If no chord is present, then 'N.C' is outputted.
         if not np.any(chroma_vector):
-             return 'N.C.'
+            return 'N.C.'
 
         best_match = 'N.C.'
-        # Set to -1 to ensure the rist comparison succeeds as 1 - cosine(x) can never be -1
         max_similarity = -1.0
         
-        # Use cosine similarity to determine similarity of detected chord to ideal chord.
         for name, template in self.CHORD_TEMPLATES.items():
-            # Determines how similar extracted chromogram is to the ideal.
-            similarity = 1 - cosine(chroma_vector, template) 
+            similarity = 1 - cosine(chroma_vector, template)
             if similarity > max_similarity:
                 max_similarity = similarity
                 best_match = name
@@ -97,31 +103,26 @@ class ChordRecognizer:
 # --- Main Analyzer ---
 
 class AudioAnalyzer:
-    """
-    Audio analyzer for pitch and chord detection.
-    """
-    def __init__(self, config: AnalysisConfig = AnalysisConfig()):
-        self.config = config
+    """Audio analyzer for pitch and chord detection."""
+    def __init__(self, config: Optional[AnalysisConfig] = None):
+        """
+        Initializes the analyzer.
+        
+        Args:
+            config: A configuration object. If None, default settings are used.
+        """
+        self.config = config if config else AnalysisConfig()
         self.chord_recognizer = ChordRecognizer()
 
     def analyze_audio(self, audio_path: str) -> List[Dict[str, Any]]:
-        """
-        Analyzes an audio file to identify a time-series of pitches and chords.
-
-        Args:
-            audio_path: The path to the input audio file.
-
-        Returns:
-            A list of dictionaries, each describing the event (pitch or chord)
-            and its timing within the audio file.
-        """
+        """Analyzes an audio file to identify a time-series of pitches and chords."""
         try:
+            # All parameters are now correctly sourced from self.config
             y, _ = librosa.load(audio_path, sr=self.config.sr)
         except Exception as e:
             print(f"Error loading audio file: {e}")
             return []
 
-        # 1. COMPUTE ONCE: Perform STFT and get magnitude and chroma features
         stft_matrix = np.abs(librosa.stft(y, 
                                           n_fft=self.config.frame_size, 
                                           hop_length=self.config.hop_length))
@@ -131,33 +132,25 @@ class AudioAnalyzer:
                                                  n_fft=self.config.frame_size,
                                                  hop_length=self.config.hop_length)
 
-        # 2. PITCH DETECTION: Use (pYIN) for pitches
         pitches, voiced_flags, _ = librosa.pyin(y,
                                                 fmin=self.config.fmin,
                                                 fmax=self.config.fmax,
                                                 sr=self.config.sr,
                                                 frame_length=self.config.frame_size,
                                                 hop_length=self.config.hop_length,
-                                                fill_na=None) # Keep NaN for unvoiced frames
+                                                fill_na=None)
 
         times = librosa.times_like(pitches, sr=self.config.sr, hop_length=self.config.hop_length)
         results = []
 
-        # 3. DECISION LOGIC: Iterate through time frames and decide
         for i, time in enumerate(times):
             pitch_hz = pitches[i]
             is_voiced = voiced_flags[i]
             
-            # Use chroma features to determine polyphony
             chroma_frame = chromagram[:, i]
-           # If more than 2 chroma bins are strong, it's likely a chord.
             is_polyphonic = np.sum(chroma_frame > 0.4) > 2
 
-            event = {
-                "time_sec": round(time, 2),
-                "type": "silence",
-                "value": None
-            }
+            event = {"time_sec": round(time, 2), "type": "silence", "value": None}
 
             if is_voiced:
                 if is_polyphonic:
@@ -166,7 +159,6 @@ class AudioAnalyzer:
                         event["type"] = "chord"
                         event["value"] = chord
                 else:
-                    # It's a single, voiced pitch
                     event["type"] = "pitch"
                     event["value"] = librosa.hz_to_note(pitch_hz)
             
@@ -193,10 +185,9 @@ class AudioAnalyzer:
                 })
                 current_event = results[i]
 
-        # Add the last event
         consolidated.append({
             "start_time_sec": current_event['time_sec'],
-            "end_time_sec": results[-1]['time_sec'] + 0.1, # Add small buffer to end time
+            "end_time_sec": results[-1]['time_sec'] + 0.1,
             "type": current_event['type'],
             "value": current_event['value']
         })
@@ -205,41 +196,20 @@ class AudioAnalyzer:
     
     @staticmethod
     def export_to_csv(results: List[Dict[str, Any]], output_path: str = "analysis_results.csv") -> None:
-        """
-        Exports pitch/chord analysis results to a CSV file.
-
-        Args:
-            results: List of dictionaries with analysis results.
-            output_path: Path to the CSV file to be written.
-        """
+        """Exports pitch/chord analysis results to a CSV file."""
         if not results:
             print("No results to export.")
             return
 
-        # Determine column keys from first result
         fieldnames = ["start_time_sec", "end_time_sec", "type", "value"]
 
         try:
             with open(output_path, mode='w', newline='', encoding='utf-8') as csvfile:
                 writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
                 writer.writeheader()
-
                 for row in results:
-                    # Ensure missing keys don't crash export
-                    filtered_row = {key: row.get(key, None) for key in fieldnames}
+                    filtered_row = {key: row.get(key) for key in fieldnames}
                     writer.writerow(filtered_row)
-
             print(f"[✅] CSV export complete: {output_path}")
         except Exception as e:
             print(f"[❌] Failed to write CSV: {e}")
-
-
-if __name__ == '__main__': 
-    # Instantiate the analyzer with default config and run it
-    analyzer = AudioAnalyzer()
-    analysis_results = analyzer.analyze_audio("./data/test.wav")
-    
-    # Print the results in a readable format
-    # Export to CSV
-    AudioAnalyzer.export_to_csv(analysis_results, output_path="./data/pitch_chord_analysis.csv")
-    
