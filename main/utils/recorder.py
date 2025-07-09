@@ -19,14 +19,16 @@ class AVRecorder:
         output_file = os.path.join(self.output_dir, f"{filename}.mp4")
         # Array containing the elements of the ffmpeg command.
         cmd = [
-            "ffmpeg",
-            "-f", "dshow",
-            "-i", f"{video_input}:{audio_input}",
+            "ffmpeg", "-framerate", "30",  # Force input framerate
+            "-f", "dshow",  # Use DirectShow for Windows devices
+            "-i", f"{video_input}:{audio_input}",  
+            "-preset", "ultrafast", # Faster x264 encoding (lower CPU usage)
             "-t", str(self.duration),
             "-c:v", "libx264",
             "-c:a", "pcm_s16le", #WAV audio
             "-strict", "experimental",
             "-pix_fmt", "yuv420p",
+            "-r", "30", # Set output framerate
             output_file
         ]
 

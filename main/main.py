@@ -121,7 +121,7 @@ class PerformanceAnalyzer:
 
 if __name__ == "__main__":
     FILENAME = "test_performance"
-    DURATION_SECONDS = 10
+    DURATION_SECONDS = 5
     
     # Create a config with our desired optimizations
     # Let's target a 5x reduction in video frames and use a lower audio sample rate.

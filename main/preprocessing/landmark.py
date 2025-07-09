@@ -25,7 +25,7 @@ class LandmarkLogger:
                     row.extend([lm.x, lm.y, lm.z])
                 writer.writerow(row)
                 
-    #Writes the header for the csv file
+    # Writes the header for the csv file
     def write_header(self):
         if not self.header_written and not os.path.exists(self.filepath):
             with open(self.filepath, mode='w', newline='') as file:
