@@ -12,7 +12,7 @@ from typing import List, Dict, Any
 # Assume your custom modules are imported here.
 # Mocks are used for demonstration.
 from utils import AVRecorder, Microphone, DirectoryCreator, DeviceLister
-from preprocessing import HandTracker, LandmarkLogger, AudioAnalyzer, AnalysisConfig
+from preprocessing import HandTracker, FeatureLogger, HandPoseFeatureEngineer, AudioAnalyzer, AnalysisConfig
 
 
 class PerformanceAnalyzer:
@@ -72,8 +72,7 @@ class PerformanceAnalyzer:
             return
 
         tracker = HandTracker()
-        logger = LandmarkLogger(output_dir=self.dir_mgr.get_output_dir())
-        logger.write_header()
+        logger = FeatureLogger(output_dir=self.dir_mgr.get_output_dir(), filename="hand_features.csv")
         
         frame_num = 0
         processed_count = 0
@@ -85,15 +84,16 @@ class PerformanceAnalyzer:
 
                 # Only process the frame if it's on the specified interval.
                 if frame_num % self.config.frame_analysis_interval == 0:
-                    _, results = tracker.process_frame(frame)
-                    logger.save_landmarks(frame_num, results)
+                    frame, results = tracker.process_frame(frame)
+                    logger.log_features(frame_number=frame_num, results=results)
                     processed_count += 1
+
                 
                 frame_num += 1
             
             total_frames = frame_num
             print(f"[Video Process PID: {pid}] Analyzed {processed_count} frames out of {total_frames} total.")
-            print(f"[Video Process PID: {pid}] Analysis complete. Results saved to {logger.filepath}")
+            print(f"[Video Process PID: {pid}] Analysis complete. Results saved to {logger.output_path}")
 
         finally:
             cap.release()

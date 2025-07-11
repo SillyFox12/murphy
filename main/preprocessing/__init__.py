@@ -1,3 +1,4 @@
+from .handfeatures import HandPoseFeatureEngineer
 from .handtracker import HandTracker
-from .landmark import LandmarkLogger
+from .handfeatures import FeatureLogger
 from .notedetector import AudioAnalyzer, AnalysisConfig

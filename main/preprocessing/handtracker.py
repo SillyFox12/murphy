@@ -22,10 +22,7 @@ class HandTracker:
         if results.multi_hand_landmarks:
             for hand in results.multi_hand_landmarks:
                 self.drawer.draw_landmarks(frame, hand, mp.solutions.hands.HAND_CONNECTIONS)
-        cv2.imshow("Hand Tracker", frame)
-
-    def exit(self):
-        return cv2.waitKey(1) & 0xFF == ord('q')
+        
 
     #Closes the viewing window
     def cleanup(self):
