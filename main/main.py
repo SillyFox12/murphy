@@ -126,7 +126,7 @@ if __name__ == "__main__":
     # Create a config with our desired optimizations
     # Let's target a 5x reduction in video frames and use a lower audio sample rate.
     optimized_config = AnalysisConfig(
-        frame_analysis_interval=5,
+        frame_analysis_interval=1,
         audio_sr=16000
     )
 
