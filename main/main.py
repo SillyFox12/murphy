@@ -5,8 +5,11 @@
 import os
 import csv
 import sys
-import cv2
 import time
+
+import numpy as np
+import cv2
+
 from multiprocessing import Process
 from typing import List, Dict, Any, Optional
 
