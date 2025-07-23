@@ -5,6 +5,7 @@ import cv2
 import mediapipe as mp
 import numpy as np
 from typing import Dict, Optional, Tuple, List
+from preprocessing.fret_geometry import GuitarNeckDetector
 
 # ==============================================================================
 # SCRIPT 1: The Corrected HandPoseFeatureEngineer
@@ -69,7 +70,7 @@ class HandPoseFeatureEngineer:
         ])
         return names
 
-    def calculate_features(self, hand_landmarks: mp.solutions.hands.HandLandmark) -> Optional[Dict[str, float]]:
+    def calculate_features(self, hand_landmarks: mp.solutions.hands.HandLandmark, neck_detector: Optional[GuitarNeckDetector] = None) -> Optional[Dict[str, float]]:
         """
         Calculates a feature vector from hand landmarks.
         Returns a dictionary of features or None if no landmarks are provided.
