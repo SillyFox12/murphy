@@ -10,16 +10,16 @@ Version: 1.1 (Path corrected)
 """
 
 import os
-import shutil
-import webbrowser
-import zipfile
+import json
 from typing import Optional, List, Tuple
 
 # Ensure you have the necessary packages installed:
 # pip install ultralytics roboflow opencv-python
 from ultralytics import YOLO
 import roboflow
+import supervision as sv
 import cv2
+import requests
 import numpy as np
 
 class FretboardDetectorYOLO:
@@ -39,7 +39,7 @@ class FretboardDetectorYOLO:
                  project_id: str = "fretboard-lfgvx",
                  workspace: str = "silly-fox-studios",
                  model_variant: str = 'yolo11n.pt',
-                 project_name: str = "data"): # Standard ultralytics project dir
+                 project_name: str = "runs/detect"): # Standard ultralytics project dir
         """
         Initializes the detector, sets up the environment, and downloads the dataset.
 
@@ -62,6 +62,8 @@ class FretboardDetectorYOLO:
         self.dataset_path: Optional[str] = None
         self.data_yaml_path: Optional[str] = None
         self.trained_model_path: Optional[str] = None
+        self.rf = roboflow.Roboflow(api_key=self.api_key)
+        self.project = self.rf.workspace(self.workspace).project(self.project_id)
 
         self._setup_environment()
 
@@ -71,9 +73,8 @@ class FretboardDetectorYOLO:
         """
         print("--- [Step 1] Setting up Environment & Downloading Dataset ---")
         try:
-            rf = roboflow.Roboflow(api_key=self.api_key)
-            project = rf.workspace(self.workspace).project(self.project_id)
-
+            rf = self.rf
+            project = self.project
             # Get the latest version of the dataset
             versions = project.versions()
             if not versions:
@@ -158,50 +159,69 @@ class FretboardDetectorYOLO:
             print(f"❌ An error occurred during evaluation: {e}")
             raise
 
-    def detect_fretboard(self, image_source: str) -> Tuple[Optional[np.ndarray], List[dict]]:
+    def detect_fretboard(self, image_source: str, confidence_threshold: int = 40) -> Tuple[Optional[np.ndarray], List[str]]:
         """
-        Performs inference on a single image to detect fretboards.
+        Runs inference using Roboflow-hosted model and returns annotated image + labels.
 
         Args:
             image_source (str): Path or URL to the image.
+            confidence_threshold (int): Minimum confidence % for detections.
 
         Returns:
-            A tuple containing:
-            - The annotated image as a NumPy array (or None if detection fails).
-            - A list of dictionaries, each with bounding box info.
+            annotated_image (np.ndarray): Image with masks and labels drawn.
+            labels (List[str]): List of detected class names with confidence.
         """
-        if not self.trained_model_path:
-            print("❌ Model has not been trained yet. Please train the model first.")
-            return None, []
-
         print(f"\n--- [Step 4] Performing Inference on: {image_source} ---")
+        
+        # 1. Instantiate the Roboflow model
+        model = self.project.version(2).model
+
+         # 2. Load image (supervision handles URL vs. local)
         try:
-            model = YOLO(self.trained_model_path)
-            results = model(image_source)
-            result = results[0]
-            annotated_image = result.plot()
+            # Attempt to read the image directly
+            image = cv2.imread(image_source)
+            if image is None:
+                raise ValueError(f"Could not read image from {image_source}. Check the path or URL.")
+        except:
+            # If the image is a URL, download it
+            response = requests.get(image_source)
+            with open("temp_image.jpg", "wb") as f:
+                f.write(response.content)
+            image = cv2.imread("temp_image.jpg")
+            if image is None:
+                raise ValueError(f"Could not read image from {image_source} after download. Check the URL or file format.")
 
-            detections = []
-            for box in result.boxes:
-                detections.append({
-                    'class_id': int(box.cls),
-                    'class_name': result.names[int(box.cls)],
-                    'confidence': float(box.conf),
-                    'xyxy': box.xyxy[0].tolist(),
-                    'xywh': box.xywh[0].tolist(),
-                })
-            
-            print(f"✅ Found {len(detections)} fretboard(s).")
-            return annotated_image, detections
+        # 3. Runs inference on the image
+        print(f"Running inference with confidence threshold: {confidence_threshold}%") 
 
-        except Exception as e:
-            print(f"❌ An error occurred during detection: {e}")
-            return None, []
+        results = model.predict(image, confidence=confidence_threshold).json()
+
+        # 4. Check for errors in the response
+        if "error" in results:
+            raise ValueError(f"Roboflow API error: {results['error']}")
+
+        # 2. Convert to Detections object
+        detections = sv.Detections.from_inference(results)
+
+        # 5. Annotate
+        mask_annotator = sv.MaskAnnotator()
+
+        annotated = mask_annotator.annotate(scene=image.copy(), detections=detections)
+
+        # 6. Show result
+        print("✅ Inference complete. Displaying annotated image...")
+        cv2.imshow("Annotated Image", annotated)
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
+
+        return annotated
+
+
 
 # ==============================================================================
 # DEMONSTRATION BLOCK
 # ==============================================================================
-if __name__ == '__main__':
+if __name__ == '__main__': 
     # --- Configuration ---
     # IMPORTANT: Replace with your actual Roboflow API Key if needed.
     ROBOFLOW_API_KEY = "9lkRaWHTPNRBK3vMVVFL" 
@@ -213,26 +233,15 @@ if __name__ == '__main__':
         print("="*60)
     else:
         # 1. Specify model path
-        trained_model_path = "data/fretboard/weights/best.pt" 
+        #trained_model_path = "data/fretboard/weights/best.pt" 
 
         # 2. Initialize the detector
-        detector = FretboardDetectorYOLO(roboflow_api_key=ROBOFLOW_API_KEY, model_variant=trained_model_path)
-
-        # 4. Set trianed model path
-        detector.trained_model_path = trained_model_path
+        detector = FretboardDetectorYOLO(roboflow_api_key=ROBOFLOW_API_KEY)
 
         # 4. Perform inference on a sample image
-        sample_image_url = "https://www.anavidovic.com/__static/5aa2e93b0dd7c82147499da02552ecea/anavidovic_web-29.jpg"
-        annotated_img, detected_boxes = detector.detect_fretboard(sample_image_url)
+        sample_image_url = "https://cdn-images.dzcdn.net/images/artist/f2546a666d757e11fe9b3c9dc1a253d0/500x500-000000-80-0-0.jpg"
+        annotated_img = detector.detect_fretboard(sample_image_url)
 
-        if annotated_img is not None:
-            print("\nDetected Bounding Boxes:")
-            for d in detected_boxes:
-                print(f"  - Class: {d['class_name']}, Confidence: {d['confidence']:.2f}, Box: {d['xyxy']}")
-            
-            output_path = "test.jpg"
-            cv2.imwrite(output_path, annotated_img)
-            print(f"\n✅ Detection result saved to: {output_path}")
-            webbrowser.open(output_path)
+      
 
 
