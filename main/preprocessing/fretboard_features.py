@@ -45,8 +45,11 @@ class Strings_Frets:
             'fret_tolerance': 8,
             'fret_ratio_tolerance': 0.25,  # Tolerance for fret spacing ratio validation
             'fret_min_span_ratio': 0.40,
-            # Image Filtering
-        }
+            # Mask
+            'roi_pt1_margin': 10,
+            'roi_pt2_margin': 10
+            }
+        
         if config_path and isinstance(config_path, (str, bytes, os.PathLike)):
             try:
                 with open(config_path, 'r') as f:
@@ -108,11 +111,25 @@ class Strings_Frets:
         else:
             self._log("Fret spacing fails geometric validation.")
             return False
-        
-    def _image_filter(self, roi_bgr: np.ndarray) -> np.ndarray:
+
+    def _image_filter(self, roi_bgr: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+
+        # ---Creating the Mask-—-
+        h, w = roi_bgr.shape[:2]
+
+        binary_mask = np.zeros((h, w), dtype=np.uint8)
+        # Creates region of interest
+        cv2.rectangle(binary_mask, (0, 0 + self.params['roi_pt1_margin']),
+                             (w, h - self.params['roi_pt2_margin']), 255, -1)
+
+        roi_mask = cv2.bitwise_and(roi_bgr, roi_bgr, mask=binary_mask)
+        self.debug_data['binary_mask'] = binary_mask
+        self.debug_data['roi_mask'] = roi_mask
+
+        cv2.imshow("ROI Mask", roi_mask )  # Debug visualization
 
         # --- STRING PREPROCESS ---
-        lab = cv2.cvtColor(roi_bgr, cv2.COLOR_BGR2Lab)
+        lab = cv2.cvtColor(roi_mask, cv2.COLOR_BGR2Lab)
         gray = lab[:, :, 0]
         self.debug_data['gray'] = gray
 
@@ -121,6 +138,7 @@ class Strings_Frets:
             gray, cv2.MORPH_OPEN,
             cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (se_radius, se_radius))
         )
+        
         flattened = cv2.subtract(gray, background)
         self.debug_data['background_flattened'] = flattened
 
@@ -140,14 +158,8 @@ class Strings_Frets:
         string_map = smoothed
 
         # --- FRET PREPROCESS (lighter) ---
-        fret_gray = cv2.cvtColor(roi_bgr, cv2.COLOR_BGR2GRAY)
+        fret_gray = cv2.cvtColor(roi_mask, cv2.COLOR_BGR2GRAY)
         blur = cv2.GaussianBlur(fret_gray, self.params['blur_kernel_size'], 0)
-
-        # Strong vertical edge emphasis (Sobel Y)
-        sobel_y = cv2.Sobel(blur, cv2.CV_64F, 0, 1, ksize=3)
-        sobel_y = np.absolute(sobel_y)
-        sobel_y = np.uint8(255* sobel_y / np.max(sobel_y))  # Normalize to 0-255
-        self.debug_data['sobel_y'] = sobel_y
 
         median_intensity = np.median(fret_gray)
         std_intensity = np.std(fret_gray)
@@ -167,25 +179,28 @@ class Strings_Frets:
 
         self._log(f"Canny thresholds (fret path): {canny_threshold1}, {canny_threshold2}")
         edges = cv2.Canny(contrast_enhanced, int(canny_threshold1), int(canny_threshold2))
+        edges = cv2.bitwise_and(edges, edges, mask=binary_mask)
         self.debug_data['edges'] = edges
 
-        return string_map, edges
+        return roi_mask, string_map, edges
 
 
-    def _detect_features(self, roi_bgr: np.ndarray) -> Tuple[List[int], List[int], np.ndarray]:
+    def _detect_features(self, roi_bgr: np.ndarray, roi_masked=None) -> Tuple[List[int], List[int], np.ndarray]:
         """
         Detects string (horizontal) and fret (vertical) line positions in a fretboard ROI.
         Uses intensity profiling for strings and HoughLines for frets.
         """
-        roi = roi_bgr.copy()
-        h, w = roi.shape[:2]
+         # --- STRING DETECTION: Horizontal Intensity Profiling ---
+        roi_mask, string_map, edges = self._image_filter(roi_bgr)
+        if roi_masked is None:
+            roi_masked = roi_mask
 
-        # --- STRING DETECTION: Horizontal Intensity Profiling ---
-        string_map, edges = self._image_filter(roi)
+        roi = roi_masked
+        h, w = roi.shape[:2]
 
         # Adaptive threshold for uneven lighting
         thresh = cv2.adaptiveThreshold(
-            string_map, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+            string_map, 255, cv2.ADAPTIVE_THRESH_MEAN_C,
             cv2.THRESH_BINARY, 11, 2
         )
 
@@ -198,28 +213,38 @@ class Strings_Frets:
         smoothed_sum = np.convolve(horizontal_sum, kernel, mode='same')
 
         # Peak detection
-        num_strings = 6  # set number of strings
+        num_strings = 6
         min_distance = h // (num_strings * 2)
         peaks, _ = find_peaks(smoothed_sum, distance=min_distance)
 
-        # Adjust to exactly num_strings peaks
-        peaks = sorted(peaks)
+        # --- Filtering candidates ---
+        # 1. Remove candidates too close to top/bottom of ROI
+        margin = int(0.20 * h)  # 20% margin
+        peaks = [p for p in peaks if margin <= p <= h - margin]
+
+        # 2. Keep at most num_strings strongest peaks
         if len(peaks) > num_strings:
             peak_values = [smoothed_sum[p] for p in peaks]
             top_indices = np.argsort(peak_values)[-num_strings:]
             peaks = sorted([peaks[i] for i in top_indices])
-        elif len(peaks) < num_strings:
-            string_height = h / num_strings
-            existing_positions = set(peaks)
+
+        # 3. If fewer than num_strings, interpolate missing strings
+        if len(peaks) < num_strings and len(peaks) > 1:
+            avg_spacing = np.mean(np.diff(sorted(peaks)))
+            existing = set(peaks)
             for i in range(num_strings):
-                est = int((i + 0.5) * string_height)
-                if not any(abs(est - pos) < min_distance for pos in existing_positions):
+                est = int(peaks[0] + i * avg_spacing)
+                if not any(abs(est - p) < min_distance for p in existing):
                     peaks.append(est)
-                    existing_positions.add(est)
             peaks = sorted(peaks)[:num_strings]
 
-        string_positions = peaks
-        self._log(f"Detected strings at: {string_positions}")
+        # Final enforcement: exactly num_strings
+        if len(peaks) > num_strings:
+            peaks = peaks[:num_strings]
+
+        string_positions = sorted(peaks)
+        self._log(f"Filtered strings at: {string_positions}")
+
 
         # --- FRET DETECTION: HoughLines ---
         minLen_fret = int(max(10, h * self.params['fret_min_len_ratio']))
