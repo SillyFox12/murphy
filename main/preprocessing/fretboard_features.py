@@ -29,10 +29,6 @@ class Strings_Frets:
         default_config = {
             # Preprocessing
             'blur_kernel_size': (5, 5),
-            'canny_threshold1_flat': 0.66,
-            'canny_threshold2_flat': 1.33,
-            'canny_threshold1_bright': 1.0,
-            'canny_threshold2_bright': 1.66,
             # Hough Transform
             'string_threshold': 50,
             'string_min_len_ratio': 0.4,
@@ -41,7 +37,6 @@ class Strings_Frets:
             'fret_min_len_ratio': 0.3,
             'fret_max_gap_ratio': 8,
             # Clustering
-            'string_tolerance': 8,
             'fret_tolerance': 8,
             'fret_ratio_tolerance': 0.25,  # Tolerance for fret spacing ratio validation
             'fret_min_span_ratio': 0.40,
@@ -50,6 +45,7 @@ class Strings_Frets:
             'roi_pt2_margin': 10
             }
         
+        # Opens a config file with program parameters. Otherwise, uses the efault parameters above.
         if config_path and isinstance(config_path, (str, bytes, os.PathLike)):
             try:
                 with open(config_path, 'r') as f:
@@ -67,7 +63,7 @@ class Strings_Frets:
         if self.verbose: print(f"[DEBUG] {message}")
 
     def _merge_lines(self, positions: List[int], tol: int) -> List[int]:
-        """Simple 1D clustering: sort positions and group values within tol."""
+        """Simple 1D clustering: sort positions and group values within tolerance."""
         if not positions:
             self._log("No positions to merge.")
             return []
@@ -128,61 +124,34 @@ class Strings_Frets:
 
         cv2.imshow("ROI Mask", roi_mask )  # Debug visualization
 
+       
         # --- STRING PREPROCESS ---
         lab = cv2.cvtColor(roi_mask, cv2.COLOR_BGR2Lab)
-        gray = lab[:, :, 0]
-        self.debug_data['gray'] = gray
+        gray = lab[:, :, 0]  # Lightness channel
+        blur = cv2.GaussianBlur(gray, self.params['blur_kernel_size'], 0)
 
-        se_radius = self.params.get('background_se_radius', 15)
-        background = cv2.morphologyEx(
-            gray, cv2.MORPH_OPEN,
-            cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (se_radius, se_radius))
-        )
-        
-        flattened = cv2.subtract(gray, background)
-        self.debug_data['background_flattened'] = flattened
+        contrast_enhanced = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(blur)
+        self.debug_data['contrast_enhanced'] = contrast_enhanced
 
-        clahe = cv2.createCLAHE(
-            clipLimit=self.params.get('clahe_clip_limit', 2.0),
-            tileGridSize=self.params.get('clahe_tile_grid_size', (8, 8))
-        )
-        contrast_enhanced = clahe.apply(flattened)
-        self.debug_data['clahe'] = contrast_enhanced
+        # --- APPLY ADAPTIVE THRESHOLDING ---
+        kernel = np.ones((5, 5), np.float32) / 25.0
+        local_means = cv2.filter2D(contrast_enhanced, -1, kernel)
 
-        d = self.params.get('bilateral_d', 5)
-        sigma_color = self.params.get('bilateral_sigma_color', 50)
-        sigma_space = self.params.get('bilateral_sigma_space', 5)
-        smoothed = cv2.bilateralFilter(contrast_enhanced, d, sigma_color, sigma_space)
-        self.debug_data['smoothed'] = smoothed
+        # Compute the local minimum threshold
+        adaptive_thresh_low = local_means - 2
 
-        string_map = smoothed
+        # Compute the global minimum threshold for Canny
+        mean_adaptive_low = np.mean(adaptive_thresh_low[binary_mask > 0])/1.3
 
-        # --- FRET PREPROCESS (lighter) ---
-        fret_gray = cv2.cvtColor(roi_mask, cv2.COLOR_BGR2GRAY)
-        blur = cv2.GaussianBlur(fret_gray, self.params['blur_kernel_size'], 0)
+        # Compute the global maximum threshold for Canny
+        mean_adaptive_high = mean_adaptive_low * 2 # Common practice: high is 2x low 
+        self._log(f"Adaptive Canny thresholds: low={mean_adaptive_low:.2f}, high={mean_adaptive_high:.2f}")
 
-        median_intensity = np.median(fret_gray)
-        std_intensity = np.std(fret_gray)
-        self._log(f"Median intensity (fret path): {median_intensity}")
-
-        if median_intensity < 100:
-            canny_threshold1 = self.params['canny_threshold1_flat'] * std_intensity
-            canny_threshold2 = self.params['canny_threshold2_flat'] * std_intensity
-        else:
-            canny_threshold1 = self.params['canny_threshold1_bright'] * std_intensity
-            canny_threshold2 = self.params['canny_threshold2_bright'] * std_intensity
-
-        contrast_enhanced = cv2.createCLAHE(
-            clipLimit=self.params.get('clahe_clip_limit', 2.0),
-            tileGridSize=self.params.get('clahe_tile_grid_size', (8, 8))
-        ).apply(blur)
-
-        self._log(f"Canny thresholds (fret path): {canny_threshold1}, {canny_threshold2}")
-        edges = cv2.Canny(contrast_enhanced, int(canny_threshold1), int(canny_threshold2))
+        edges = cv2.Canny(contrast_enhanced, threshold1=mean_adaptive_low, threshold2=mean_adaptive_high)
         edges = cv2.bitwise_and(edges, edges, mask=binary_mask)
         self.debug_data['edges'] = edges
 
-        return roi_mask, string_map, edges
+        return roi_mask, edges
 
 
     def _detect_features(self, roi_bgr: np.ndarray, roi_masked=None) -> Tuple[List[int], List[int], np.ndarray]:
@@ -191,7 +160,7 @@ class Strings_Frets:
         Uses intensity profiling for strings and HoughLines for frets.
         """
          # --- STRING DETECTION: Horizontal Intensity Profiling ---
-        roi_mask, string_map, edges = self._image_filter(roi_bgr)
+        roi_mask, edges = self._image_filter(roi_bgr)
         if roi_masked is None:
             roi_masked = roi_mask
 
@@ -200,7 +169,7 @@ class Strings_Frets:
 
         # Adaptive threshold for uneven lighting
         thresh = cv2.adaptiveThreshold(
-            string_map, 255, cv2.ADAPTIVE_THRESH_MEAN_C,
+            edges, 255, cv2.ADAPTIVE_THRESH_MEAN_C,
             cv2.THRESH_BINARY, 11, 2
         )
 
@@ -277,13 +246,27 @@ class Strings_Frets:
         # --- Debug drawing ---
         debug = roi.copy()
 
+        """Retired for now: Come back to this later"""
         # Draw strings (green)
-        for y in string_positions:
-            cv2.line(debug, (0, y), (w - 1, y), (0, 255, 0), 1)
+        #for y in string_positions:
+            #cv2.line(debug, (0, y), (w - 1, y), (0, 255, 0), 1)
+        """Retired for now: Come back to this later"""
 
         # Draw frets (blue)
         for x in fret_positions:
             cv2.line(debug, (x, 0), (x, h - 1), (255, 0, 0), 1)
+
+        # Guesstimates string positions for first three strings
+        first_string_pos = 18
+        spacing = 10
+
+        for i in range(first_string_pos, first_string_pos + (3 * spacing), spacing):
+            cv2.line(debug, (0, i), (w -1, i), (0, 255, 0), 1)
+
+        # Guesstimates string positions for last three strings
+        fourth_string_pos = 45
+        for i in range(fourth_string_pos, fourth_string_pos + (3 * spacing), spacing):
+            cv2.line(debug, (0, i), (w -1, i+5), (0, 255, 0), 1)
 
         return string_positions, fret_positions, debug
 
@@ -294,7 +277,6 @@ if __name__ == "__main__":
     detector = Strings_Frets(None, verbose=True)
     string_positions, fret_positions, debug_image = detector._detect_features(roi)
     cv2.imshow("Canny Edges", detector.debug_data.get('edges', np.zeros_like(roi)))
-    cv2.imshow("Flattened", detector.debug_data.get('background_flattened', np.zeros_like(roi)))
     cv2.imwrite("data/canny_edges.jpg", detector.debug_data.get('edges', np.zeros_like(roi)))
     cv2.imshow("Debug", debug_image)
     cv2.imwrite("data/debug_image.jpg", debug_image)
