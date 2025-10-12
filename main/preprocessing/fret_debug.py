@@ -1,5 +1,6 @@
 import cv2
 import matplotlib.pyplot as plt
+import numpy as np
 
 class FretboardDebugVisualizer:
     """A dedicated class to generate a visual debugging panel for the detector."""

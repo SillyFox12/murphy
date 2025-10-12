@@ -22,7 +22,7 @@ import cv2
 import requests
 import numpy as np
 
-class FretboardDetectorYOLO:
+class FretboardDetector:
     """
     A class to manage the training, evaluation, and inference of a YOLOv11
     model for guitar fretboard detection.
@@ -280,10 +280,10 @@ if __name__ == '__main__':
         #trained_model_path = "data/fretboard/weights/best.pt" 
 
         # 2. Initialize the detector
-        detector = FretboardDetectorYOLO(roboflow_api_key=ROBOFLOW_API_KEY)
+        detector = FretboardDetector(roboflow_api_key=ROBOFLOW_API_KEY)
 
         # 4. Perform inference on a sample image
-        sample_image_url = "https://cdn-images.dzcdn.net/images/artist/f2546a666d757e11fe9b3c9dc1a253d0/500x500-000000-80-0-0.jpg"
+        sample_image_url = 'data/test_imgs/WIN_20251002_18_32_51_Pro.jpg' 
         annotated_img, roi_crop = detector.detect_fretboard(sample_image_url)
 
         if annotated_img is not None:
@@ -293,8 +293,14 @@ if __name__ == '__main__':
         if roi_crop is not None:
             cv2.imshow("Tightly Cropped Fretboard ROI", roi_crop)
             cv2.waitKey(0)
+            cv2.destroyAllWindows()
+            save_path = "data/cropped_fretboard.jpg"
+            cv2.imwrite(save_path, roi_crop)
+            print(f"💾 Cropped fretboard saved to: {os.path.abspath(save_path)}")
+             
+    
         
-        cv2.destroyAllWindows()
+       
 
       
 

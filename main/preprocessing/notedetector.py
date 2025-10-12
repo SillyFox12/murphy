@@ -213,3 +213,15 @@ class AudioAnalyzer:
             print(f"[✅] CSV export complete: {output_path}")
         except Exception as e:
             print(f"[❌] Failed to write CSV: {e}")
+
+# --- Testing ---
+if __name__ == "__main__":
+    # Example usage
+    analyzer = AudioAnalyzer()
+    audio_file_path = 'data/test_audio/guitar-one-note-key-c4_C.wav'  # Replace with your audio file path
+    analysis_results = analyzer.analyze_audio(audio_file_path)
+    
+    for event in analysis_results:
+        print(event)
+    
+    analyzer.export_to_csv(analysis_results, output_path="analysis_results.csv")
