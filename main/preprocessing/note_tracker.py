@@ -5,7 +5,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 from typing import Tuple, Optional
 
-
 class AnalysisConfig:
     def __init__(
         self,
@@ -24,7 +23,6 @@ class AnalysisConfig:
         self.audio_frame_size = self.frame_size = audio_frame_size
         self.audio_fmin = self.fmin = audio_fmin
         self.audio_fmax = self.fmax = audio_fmax
-
 
 class Utilities:
     def __init__(self, config: Optional[AnalysisConfig] = None):
@@ -83,7 +81,6 @@ class Utilities:
         sd.stop()
         print("Playback finished.")
 
-
 class NoteTracker(Utilities):
     def __init__(self, config: Optional[AnalysisConfig] = None):
         super().__init__(config)
@@ -94,109 +91,131 @@ class NoteTracker(Utilities):
         note = librosa.midi_to_note(midi_int, octave=True)
         cents = 100 * (midi - midi_int)
         return note, cents
+    
+    def _multiband_flux(self, y, sr, n_fft=2048, hop_length=256, n_bands=4):
+        S = np.abs(librosa.stft(y, n_fft=n_fft, hop_length=hop_length))
+        S_log = np.log1p(S)
 
-    def _parabolic_interpolation(self, mag: np.ndarray, idx: int, freqs: np.ndarray):
-        if idx <= 0 or idx >= len(mag) - 1:
-            return float(freqs[idx]), float(mag[idx])
-        a, b, g = map(float, (mag[idx - 1], mag[idx], mag[idx + 1]))
-        denom = a - 2 * b + g
-        if denom == 0 or not np.isfinite(denom):
-            return float(freqs[idx]), b
-        p = 0.5 * (a - g) / denom
-        if not np.isfinite(p):
-            p = 0.0
-        p = max(min(p, 1.0), -1.0)
-        bin_hz = float(freqs[1] - freqs[0])
-        f = float(freqs[idx] + p * bin_hz)
-        m = float(b - 0.25 * (a - g) * p)
-        if not np.isfinite(f):
-            f = float(freqs[idx])
-        if not np.isfinite(m):
-            m = b
-        return f, m
+        flux_bands = np.zeros(S_log.shape[1] - 1)
 
-    def _hps_for_vector(self, mag: np.ndarray, n_harmonics: int = 5, eps: float = 1e-12):
-        mag = np.maximum(mag, eps)
-        log_mag = np.log(mag)
-        hps = log_mag.copy()
-        for k in range(2, n_harmonics + 1):
-            dec = log_mag[::k]
-            if len(dec) < len(hps):
-                pad_len = len(hps) - len(dec)
-                dec = np.pad(dec, (0, pad_len), constant_values=np.log(eps))
-            hps[: len(dec)] += dec[: len(hps)]
-        return np.exp(hps - hps.max())
+        # Split into subbands
+        edges = np.linspace(0, S_log.shape[0], n_bands + 1, dtype=int)
 
-    def detect_onsets(self, y: np.ndarray):
-        frames = librosa.onset.onset_detect(
-            y=y,
-            sr=self.config.sr,
-            hop_length=self.config.hop_length,
-            backtrack=True,
+        for i in range(n_bands):
+            band = S_log[edges[i]:edges[i+1], :]
+            diff = np.diff(band, axis=1)
+            diff = np.maximum(diff, 0.0)
+            env = diff.mean(axis=0)
+            # emphasize high-frequency bands (good for plucks)
+            weight = 1.0 + (i / n_bands)
+            flux_bands += weight * env
+
+        # Normalize
+        flux_bands = flux_bands / (flux_bands.max() + 1e-6)
+
+        frame_times = librosa.frames_to_time(
+            np.arange(len(flux_bands)),
+            sr=sr,
+            hop_length=hop_length
         )
-        times = librosa.frames_to_time(frames, sr=self.config.sr, hop_length=self.config.hop_length)
+
+        return flux_bands, frame_times
+    
+    def _adaptive_threshold(self, onset_env, w=16, offset=0.03):
+        """
+        Local adaptive threshold:
+        threshold[i] = median(onset_env[i-w:i+w]) + offset
+        """
+        from scipy.ndimage import median_filter
+
+        med = median_filter(onset_env, size=w)
+        return med + offset
+
+    def detect_onsets(self, y, sr=None) -> list:
+        """
+        Onset detection using harmonic-percussive source separation (HPSS)
+        """
+        sr = sr if sr is not None else self.config.sr
+
+        # Padding to stabilize tail STFT frames (20–30 ms)
+        pad = np.zeros(int(0.03 * sr))
+        y = np.concatenate([y, pad])
+
+        # 1. HPSS – isolate pluck energy
+        _, y_perc = librosa.effects.hpss(y)
+
+        # 2. Multi-band flux
+        onset_env, frame_times = self._multiband_flux(y_perc, sr)
+
+        # 3. Adaptive thresholding
+        th = float(np.median(onset_env) + 0.05)
+
+        # 4. Peak picking
+        WIN = 3  # 3 frames ≈ 20–30 ms
+        onset_frames = []
+
+        for i in range(WIN, len(onset_env) - WIN):
+            local = onset_env[i-WIN:i+WIN+1]
+            if onset_env[i] == local.max() and onset_env[i] > th:
+                onset_frames.append(i)
+        onset_times = frame_times[onset_frames].tolist()
+
+        # Ensure first onset is close to start
+        if (len(onset_times)) > 0 and onset_times[0] > 0.05:
+            first_idx = np.argmax(onset_env[:4])  # first few frames
+            onset_times.insert(0, float(frame_times[first_idx]))
+
+        # Ensure last onset near end
+        TAIL_FRAMES = 12  # ~70–90 ms depending on hop_length
+        tail = onset_env[-TAIL_FRAMES:]
+        tail_times = frame_times[-TAIL_FRAMES:]
+
+        peak_i = np.argmax(tail)
+        last_time = float(tail_times[peak_i])
+        last_val = float(tail[peak_i])
+
+        # Conditions (research-backed)
+        strong_enough = last_val > 0.25 * onset_env.max()  # lower threshold
+        far_enough = (len(onset_times) == 0) or (last_time - onset_times[-1] > 0.05)
+        rising_slope = (peak_i > 0 and tail[peak_i] > tail[peak_i - 1] * 1.1)
+
+        if strong_enough and far_enough and rising_slope:
+            onset_times.append(last_time)
+
         plt.figure(figsize=(14, 5))
         librosa.display.waveshow(y, sr=self.config.sr, alpha=0.6)
-        for t in times:
+        for t in onset_times:
             plt.axvline(t, color="r", linestyle="--", linewidth=1.5)
         plt.title("Waveform with librosa-detected onsets")
         plt.tight_layout()
-        plt.show()
-        return times
+        plt.show()  
+        
+        return onset_times
+    
+    def monophonic_f0(self, y: np.ndarray, fmin: float = None, fmax: float = None):
+        """
+        Monophonic pitch detection using librosa's pYIN algorithm.
+        """
+        sr = self.config.sr
+        fmin = fmin or self.config.fmin
+        fmax = fmax or self.config.fmax
 
-    def polyphonic_hps(
-        self,
-        y: np.ndarray,
-        sr: Optional[int] = None,
-        n_harmonics: int = 5,
-        threshold_rel: float = 0.08,
-        rms_threshold: float = 1e-4,
-        max_peaks: int = 6,
-    ) -> list:
-        sr = sr or self.config.sr
-        n_fft = self.config.frame_size
-        hop = self.config.hop_length
-        fmin, fmax = self.config.fmin, self.config.fmax
-        if y is None or len(y) == 0:
-            return []
-        S = np.abs(librosa.stft(y, n_fft=n_fft, hop_length=hop, window="hann", center=True))
-        freqs = librosa.fft_frequencies(sr=sr, n_fft=n_fft)
-        mask = (freqs >= fmin) & (freqs <= fmax)
-        S_crop = S[mask]
-        freqs_crop = freqs[mask]
-        times = librosa.frames_to_time(np.arange(S_crop.shape[1]), sr=sr, hop_length=hop)
-        det = []
-        for ti in range(S_crop.shape[1]):
-            mag = S_crop[:, ti]
-            if np.sqrt(np.mean(mag**2)) < rms_threshold:
-                continue
-            hps = self._hps_for_vector(mag, n_harmonics=n_harmonics)
-            thr = threshold_rel * np.max(hps)
-            if thr <= 0:
-                continue
-            try:
-                peaks = librosa.util.peak_pick(hps, 3, 3, 3, 3, thr, 5)
-            except Exception:
-                peaks = np.where(hps > thr)[0]
-            if len(peaks) == 0:
-                continue
-            sal = hps[peaks]
-            peaks = peaks[np.argsort(-sal)][:max_peaks]
-            for idx in peaks:
-                f_interp, s_interp = self._parabolic_interpolation(hps, idx, freqs_crop)
-                if not np.isfinite(f_interp) or f_interp <= 0:
-                    continue
-                note, cents = self.freq_to_note(f_interp)
-                det.append(
-                    {
-                        "time": float(times[ti]),
-                        "freq": float(f_interp),
-                        "salience": float(s_interp),
-                        "note": note,
-                        "cents": float(cents),
-                    }
-                )
-        return det
+        f0, voiced_flag, voiced_probs = librosa.pyin(
+            y,
+            fmin=fmin,
+            fmax=fmax,
+            sr=sr,
+            frame_length=self.config.frame_size,
+            hop_length=self.config.hop_length,
+            center=True,
+        )  
+
+        f0_times = librosa.frames_to_time(
+            np.arange(len(f0)),
+            sr=sr,
+            hop_length=self.config.hop_length,
+        )
+        return f0_times, f0, voiced_flag, voiced_probs 
 
     def group_pitches_by_time(self, detections: list):
         buckets = {}
@@ -205,26 +224,69 @@ class NoteTracker(Utilities):
             buckets.setdefault(t, []).append(d)
         return buckets
 
-    def pitch_at_onsets(self, onset_times: list, pitch_detections: list, window: float = 0.05):
+    def pitch_at_onsets(self, 
+                        onset_times: list, 
+                        f0_times: np.ndarray, 
+                        f0_hz: np.ndarray, 
+                        voiced_flag: np.ndarray, 
+                        window_tail: float = 0.05,):
         events = []
-        for onset in onset_times:
-            cand = [d for d in pitch_detections if onset <= d["time"] <= onset + window]
-            if not cand:
+        onset_times = sorted(onset_times)
+        n_onsets = len(onset_times)
+        prev_f = None
+
+        for i, onset in enumerate(onset_times):
+            if i < n_onsets -1:
+                t_start = onset
+                t_end = onset_times[i + 1] + window_tail
+            else:
+                t_start = onset
+                t_end = f0_times[-1]  # last onset, look ahead 0.5s
+            
+            mask = (f0_times >= t_start) & (f0_times <= t_end) & voiced_flag
+            if not np.any(mask):
                 continue
-            cand.sort(key=lambda d: -d["salience"])
-            events.append({"onset": onset, "pitch": cand[0]})
+            f0_segment = f0_hz[mask]
+
+            f0_med = float(np.median(f0_segment))
+            if prev_f is not None:
+                f0_med = self._correct_octave_jump(prev_f, f0_med)
+            prev_f = f0_med
+            note, cents = self.freq_to_note(float(f0_med))
+
+            events.append(
+                {
+                    "onset": float(onset),
+                    "pitch": {
+                        "freq": float(f0_med),
+                        "note": note,
+                        "cents": float(cents),
+                    },
+                })
+        
         return events
+    
+    def _correct_octave_jump(self, prev_freq: float, curr_freq: float):
+        if prev_freq <= 0 or curr_freq <= 0:
+            return curr_freq
 
-    def analyze(self, y: np.ndarray):
-        pitches = self.polyphonic_hps(y)
-        onsets = self.detect_onsets(y)
-        return self.pitch_at_onsets(onsets, pitches)
-
+        # Bring curr_freq within a factor-of-2 neighborhood of prev_freq
+        while curr_freq > 1.8 * prev_freq:
+            curr_freq /= 2.0
+        while curr_freq < 0.6 * prev_freq:
+            curr_freq *= 2.0
+        return curr_freq
+    
+    def analyze(self, y:np.ndarray):
+        onsets = self.detect_onsets(y, sr=self.config.sr)
+        f0_times, f0_hz, voiced_flag, _ = self.monophonic_f0(y)
+        events = self.pitch_at_onsets(onsets, f0_times, f0_hz, voiced_flag)
+        return events
 
 if __name__ == "__main__":
     util = Utilities()
     tracker = NoteTracker(util.config)
-    loaded, music = util.load("data/test.wav")
+    loaded, music = util.load("data/quarter_cmaj.wav")
     if not loaded:
         print("Failed to load audio file.")
     else:
