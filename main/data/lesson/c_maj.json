@@ -1,0 +1,37 @@
+{
+    "c_maj": [
+        { "note": "C3", "duration": "quarter" },
+        { "note": "D3", "duration": "quarter" },
+        { "note": "E3", "duration": "quarter" },
+        { "note": "F3", "duration": "quarter" },
+        { "note": "G3", "duration": "quarter" },
+        { "note": "A3", "duration": "quarter" },
+        { "note": "B3", "duration": "quarter" },
+
+        { "note": "C4", "duration": "quarter" },
+        { "note": "D4", "duration": "quarter" },
+        { "note": "E4", "duration": "quarter" },
+        { "note": "F4", "duration": "quarter" },
+        { "note": "G4", "duration": "quarter" },
+        { "note": "A4", "duration": "quarter" },
+        { "note": "B4", "duration": "quarter" },
+
+        { "note": "C5", "duration": "quarter" },
+
+        { "note": "B4", "duration": "quarter" },
+        { "note": "A4", "duration": "quarter" },
+        { "note": "G4", "duration": "quarter" },
+        { "note": "F4", "duration": "quarter" },
+        { "note": "E4", "duration": "quarter" },
+        { "note": "D4", "duration": "quarter" },
+        { "note": "C4", "duration": "quarter" },
+
+        { "note": "B3", "duration": "quarter" },
+        { "note": "A3", "duration": "quarter" },
+        { "note": "G3", "duration": "quarter" },
+        { "note": "F3", "duration": "quarter" },
+        { "note": "E3", "duration": "quarter" },
+        { "note": "D3", "duration": "quarter" },
+        { "note": "C3", "duration": "quarter" }
+    ]
+}
