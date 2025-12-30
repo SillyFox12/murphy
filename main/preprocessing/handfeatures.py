@@ -5,6 +5,7 @@ import cv2
 import mediapipe as mp
 import numpy as np
 from typing import Dict, Optional, Tuple, List
+from tqdm import tqdm
 
 # ==============================================================================
 # SCRIPT 1: The Corrected HandPoseFeatureEngineer
@@ -126,7 +127,9 @@ class FeatureLogger:
     def __init__(self, output_dir: str, filename: str = "hand_features.csv"):
         self.output_path = os.path.join(output_dir, filename)
         self.feature_engineer = HandPoseFeatureEngineer()
-        self.header = ["frame", "hand_index"] + self.feature_engineer.get_feature_names()
+        self.header = ["frame", "hand_index"] + self.feature_engineer.get_feature_names() + ["wrist_error", "wrist_error_type",
+                                                                                          "thumb_error", "thumb_error_type",
+                                                                                          "finger_error", "finger_error_type"]
         self._write_header_if_needed()
 
     def _write_header_if_needed(self):
@@ -146,7 +149,14 @@ class FeatureLogger:
             for hand_idx, hand_landmarks in enumerate(results.multi_hand_landmarks):
                 feature_vector = self.feature_engineer.calculate_features(hand_landmarks)
                 if feature_vector:
-                    row_data = {"frame": frame_number, "hand_index": hand_idx}
+                    row_data = {"frame": frame_number, 
+                                "hand_index": hand_idx,
+                                "wrist_error": 0.0,
+                                "wrist_error_type": "none",
+                                "thumb_error": 0.0,
+                                "thumb_error_type": "none",
+                                "finger_error": 0.0,
+                                "finger_error_type": "none"}
                     row_data.update(feature_vector)
                     writer.writerow(row_data)
 
@@ -169,6 +179,44 @@ class HandTracker:
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         results = self.hands.process(frame_rgb)
         return results
+    
+    def extract_features_from_frames(
+        self,
+        frames_dir: str,
+        output_dir: str,
+        output_csv: str = "hand_features.csv"
+    ):
+        """
+        Feeds a folder of frames through MediaPipe and logs features to CSV.
+        """
+        os.makedirs(output_dir, exist_ok=True)
+
+        tracker = HandTracker()
+        logger = FeatureLogger(output_dir=output_dir, filename=output_csv)
+
+        # Sort frames to preserve time order
+        frame_files = sorted([
+            f for f in os.listdir(frames_dir)
+            if f.lower().endswith((".png", ".jpg", ".jpeg"))
+        ])
+
+        print(f"Processing {len(frame_files)} frames...")
+
+        for frame_idx, frame_name in enumerate(tqdm(frame_files)):
+            frame_path = os.path.join(frames_dir, frame_name)
+            frame = cv2.imread(frame_path)
+
+            if frame is None:
+                print(f"⚠️ Skipping unreadable frame: {frame_name}")
+                continue
+
+            results = tracker.process_frame(frame)
+            logger.log_features(frame_idx, results)
+
+        tracker.cleanup()
+        print(f"\n✅ Feature extraction complete.")
+        print(f"📄 Output saved to: {logger.output_path}")
+
 
     def cleanup(self):
         """Releases MediaPipe resources."""
@@ -179,31 +227,10 @@ class HandTracker:
 # ==============================================================================
 
 if __name__ == '__main__':
-    # --- Setup ---
-    dummy_frame = np.zeros((480, 640, 3), dtype=np.uint8) 
-    output_directory = "./data"
-    os.makedirs(output_directory, exist_ok=True)
-    
-    print(f"Initializing components. Output will be saved in '{output_directory}'.")
     tracker = HandTracker()
-    logger = FeatureLogger(output_dir=output_directory, filename="hand_features.csv")
-    print(f"Logger initialized. Feature data will be saved to: {logger.output_path}")
 
-    # --- Main Loop Simulation ---
-    print("\nSimulating video processing for 5 frames...")
-    for frame_number in range(5):
-        results = tracker.process_frame(dummy_frame)
-
-        # Manually add mock landmarks to demonstrate the logger.
-        if results.multi_hand_landmarks is None:
-            from mediapipe.framework.formats import landmark_pb2
-            mock_landmarks = landmark_pb2.NormalizedLandmarkList()
-            for _ in range(21):
-                mock_landmarks.landmark.add(x=np.random.rand(), y=np.random.rand(), z=np.random.rand())
-            results.multi_hand_landmarks = [mock_landmarks]
-
-        logger.log_features(frame_number, results)
-        print(f"  - Processed frame {frame_number} and logged features.")
-
-    tracker.cleanup()
-    print(f"\n✅ Simulation complete. Check '{logger.output_path}' for the full feature set.")
+    tracker.extract_features_from_frames(
+        frames_dir=r"data/hand_data/wrist/raised",
+        output_dir=r"data/processed_hand_data/wrist/raised",
+        output_csv="raised_wrist.csv"
+    )
