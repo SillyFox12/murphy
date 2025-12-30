@@ -14,6 +14,7 @@ class AnalysisConfig:
         audio_frame_size: int = 4096,
         audio_fmin: float = librosa.note_to_hz("C2"),
         audio_fmax: float = librosa.note_to_hz("C7"),
+        fps: int = 30,
     ):
         if frame_analysis_interval < 1:
             raise ValueError("frame_analysis_interval must be 1 or greater.")
@@ -23,6 +24,7 @@ class AnalysisConfig:
         self.audio_frame_size = self.frame_size = audio_frame_size
         self.audio_fmin = self.fmin = audio_fmin
         self.audio_fmax = self.fmax = audio_fmax
+        self.fps = fps
 
 class Utilities:
     def __init__(self, config: Optional[AnalysisConfig] = None):
@@ -281,12 +283,13 @@ class NoteTracker(Utilities):
         onsets = self.detect_onsets(y, sr=self.config.sr)
         f0_times, f0_hz, voiced_flag, _ = self.monophonic_f0(y)
         events = self.pitch_at_onsets(onsets, f0_times, f0_hz, voiced_flag)
+        frame_idx = int(onsets * self.config.fps)
         return events
 
 if __name__ == "__main__":
     util = Utilities()
     tracker = NoteTracker(util.config)
-    loaded, music = util.load("data/quarter_cmaj.wav")
+    loaded, music = util.load("data/test/quarter_cmaj.wav")
     if not loaded:
         print("Failed to load audio file.")
     else:
