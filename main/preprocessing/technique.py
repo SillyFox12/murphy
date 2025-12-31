@@ -53,6 +53,19 @@ class HandDataSet:
 
     def filter_errors(self, error_col: str):
         return self.df[self.df[error_col] == 1]
+    
+    def get_error_type_dataset(self, part: str):
+        """
+        Returns features + type labels for error-type classification.
+        Only error rows are included.
+        """
+        error_df = self.df[self.df[f"{part}_error"] == 1]
+
+        X = error_df[self.base_features]
+        y = error_df[f"{part}_error_type"]
+
+        return X, y
+
 
 class TechniqueModel:
     def __init__(
@@ -118,6 +131,29 @@ class TechniqueOrchestrator:
         
         # Return test data for the confusion matrix
         return model, X_test, y_test
+    
+    def train_type_classifier(self, part: str):
+        model = TechniqueModel(
+            name=f"{part.upper()} ERROR TYPE CLASSIFIER",
+            n_estimators=300,
+            class_weight="balanced"
+        )
+
+        X, y = self.dataset.get_error_type_dataset(part)
+
+        # Sanity check
+        print("\n🧪 Error type distribution:")
+        print(y.value_counts())
+
+        X_test, y_test = model.train(X, y)
+
+        y_pred = model.predict(X_test)
+
+        print(f"\n📊 {model.name} (Validation on Unseen Error Samples)")
+        print(classification_report(y_test, y_pred))
+
+        return model, X_test, y_test
+
 
     def save_model(self, model: TechniqueModel, filepath: str):
         joblib.dump(model, filepath)
@@ -148,20 +184,20 @@ class TechniqueOrchestrator:
         plt.show()
 
 if __name__ == '__main__':
-    good_tech_files = ["data/processed_hand_data/fingers/straight/straight_finger.csv"]
-    bad_tech_files = ["data/processed_hand_data/fingers/leaning/leaning_finger.csv"]
+    good_tech_files = []
+    bad_tech_files = ["data/processed_hand_data/wrist/raised/raised_wrist.csv", 
+                      "data/processed_hand_data/wrist/caved/caved_wrist.csv"]
     
     orchestrator = TechniqueOrchestrator(good_tech=good_tech_files,
                                          bad_tech=bad_tech_files,
-                                         part="finger")  
+                                         part="wrist")  
 
-    finger_detector, X_test, y_test = orchestrator.train_detector(part="finger")
-    orchestrator.save_model(finger_detector, "models/finger_error_detector.pkl") # type: ignore # ignore
+    wrist_detector, X_test, y_test = orchestrator.train_type_classifier(part="wrist")
+    orchestrator.save_model(wrist_detector, "models/wrist_error_type_detector.pkl") # type: ignore # ignore
 
-    orchestrator.plot_feature_importance(finger_detector, top_n=15)
-    
+    orchestrator.plot_feature_importance(wrist_detector, top_n=15)
     orchestrator.confusion_matrix(
         y_true=y_test,
-        y_pred=finger_detector.predict(X_test),
+        y_pred=wrist_detector.predict(X_test),
         labels=[0, 1]
     )
