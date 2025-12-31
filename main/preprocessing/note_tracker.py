@@ -82,56 +82,67 @@ class Utilities:
         sd.wait()
         sd.stop()
         print("Playback finished.")
+    
+    def save_to_csv(self, events: list, output_path: str):
+        """
+        Saves the analysis events to a CSV file.
+        """
+        import csv
+        
+        if not events:
+            print("No events to save.")
+            return
+
+        # Define headers (flattening the nested 'pitch' dict)
+        headers = ["onset", "duration", "note", "freq", "cents"]
+
+        try:
+            with open(output_path, mode="w", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=headers)
+                writer.writeheader()
+
+                for ev in events:
+                    # Flatten the data structure for CSV
+                    row = {
+                        "onset": f"{ev['onset']:.3f}",
+                        "duration": f"{ev.get('duration', 0):.3f}", # Handle cases where duration might be missing
+                        "note": ev["pitch"]["note"],
+                        "freq": f"{ev["pitch"]["freq"]:.2f}",
+                        "cents": f"{ev["pitch"]["cents"]:.2f}",
+                    }
+                    writer.writerow(row)
+            print(f"Successfully saved analysis to: {output_path}")
+        except IOError as e:
+            print(f"Could not save CSV: {e}")
 
 class NoteTracker(Utilities):
     def __init__(self, config: Optional[AnalysisConfig] = None):
         super().__init__(config)
 
     def freq_to_note(self, freq: float):
+        if freq <= 0:
+            return "N/A", 0.0
         midi = librosa.hz_to_midi(freq)
         midi_int = int(round(midi))
         note = librosa.midi_to_note(midi_int, octave=True)
         cents = 100 * (midi - midi_int)
         return note, cents
-    
+
     def _multiband_flux(self, y, sr, n_fft=2048, hop_length=256, n_bands=4):
         S = np.abs(librosa.stft(y, n_fft=n_fft, hop_length=hop_length))
         S_log = np.log1p(S)
-
         flux_bands = np.zeros(S_log.shape[1] - 1)
-
-        # Split into subbands
         edges = np.linspace(0, S_log.shape[0], n_bands + 1, dtype=int)
-
         for i in range(n_bands):
             band = S_log[edges[i]:edges[i+1], :]
             diff = np.diff(band, axis=1)
             diff = np.maximum(diff, 0.0)
             env = diff.mean(axis=0)
-            # emphasize high-frequency bands (good for plucks)
             weight = 1.0 + (i / n_bands)
             flux_bands += weight * env
-
-        # Normalize
         flux_bands = flux_bands / (flux_bands.max() + 1e-6)
-
-        frame_times = librosa.frames_to_time(
-            np.arange(len(flux_bands)),
-            sr=sr,
-            hop_length=hop_length
-        )
-
+        frame_times = librosa.frames_to_time(np.arange(len(flux_bands)), sr=sr, hop_length=hop_length)
         return flux_bands, frame_times
-    
-    def _adaptive_threshold(self, onset_env, w=16, offset=0.03):
-        """
-        Local adaptive threshold:
-        threshold[i] = median(onset_env[i-w:i+w]) + offset
-        """
-        from scipy.ndimage import median_filter
-
-        med = median_filter(onset_env, size=w)
-        return med + offset
 
     def detect_onsets(self, y, sr=None) -> list:
         """
@@ -193,32 +204,78 @@ class NoteTracker(Utilities):
         plt.show()  
         
         return onset_times
-    
-    def monophonic_f0(self, y: np.ndarray, fmin: float = None, fmax: float = None):
-        """
-        Monophonic pitch detection using librosa's pYIN algorithm.
-        """
-        sr = self.config.sr
-        fmin = fmin or self.config.fmin
-        fmax = fmax or self.config.fmax
 
+    def adaptive_threshold(self, onset_env, w=16, offset=0.03) -> np.ndarray:
+        """
+        Local adaptive threshold:
+        threshold[i] = median(onset_env[i-w:i+w]) + offset
+        """
+        from scipy.ndimage import median_filter
+
+        med = median_filter(onset_env, size=w)
+        return med + offset
+
+    def monophonic_f0(self, y: np.ndarray):
+        """
+        Using pYIN. Consider tuning frame_length if latency is an issue.
+        """
         f0, voiced_flag, voiced_probs = librosa.pyin(
             y,
-            fmin=fmin,
-            fmax=fmax,
-            sr=sr,
+            fmin=self.config.fmin,
+            fmax=self.config.fmax,
+            sr=self.config.sr,
             frame_length=self.config.frame_size,
             hop_length=self.config.hop_length,
             center=True,
-        )  
-
-        f0_times = librosa.frames_to_time(
-            np.arange(len(f0)),
-            sr=sr,
-            hop_length=self.config.hop_length,
         )
-        return f0_times, f0, voiced_flag, voiced_probs 
+        f0_times = librosa.frames_to_time(
+            np.arange(len(f0)), sr=self.config.sr, hop_length=self.config.hop_length
+        )
+        return f0_times, f0, voiced_flag, voiced_probs
 
+    def pitch_at_onsets(self, 
+                        onset_times: list, 
+                        f0_times: np.ndarray, 
+                        f0_hz: np.ndarray, 
+                        voiced_flag: np.ndarray):
+        events = []
+        onset_times = sorted(onset_times)
+
+        # Define maximum analysis window (seconds)
+        max_analysis_window = 0.2 
+
+        for i, onset in enumerate(onset_times):
+            # Define window: Start at onset, end at next onset OR max_analysis_window
+            t_start = onset
+            if i < len(onset_times) - 1:
+                dist_to_next = onset_times[i+1] - onset
+                duration = min(dist_to_next, max_analysis_window)
+            else:
+                duration = max_analysis_window     
+            t_end = t_start + duration
+            
+            # Extract pitch candidates in this window
+            mask = (f0_times >= t_start) & (f0_times <= t_end) & voiced_flag 
+            if not np.any(mask):
+                continue    
+            f0_segment = f0_hz[mask]
+            
+            # Use median to ignore outliers
+            f0_med = float(np.median(f0_segment))
+            
+            note, cents = self.freq_to_note(f0_med)
+
+            events.append({
+                "onset": float(onset),
+                "duration": float(duration),
+                "pitch": {
+                    "freq": float(f0_med),
+                    "note": note,
+                    "cents": float(cents),
+                },
+            })   
+        return events
+    
     def group_pitches_by_time(self, detections: list):
         buckets = {}
         for d in detections:
@@ -226,81 +283,58 @@ class NoteTracker(Utilities):
             buckets.setdefault(t, []).append(d)
         return buckets
 
-    def pitch_at_onsets(self, 
-                        onset_times: list, 
-                        f0_times: np.ndarray, 
-                        f0_hz: np.ndarray, 
-                        voiced_flag: np.ndarray, 
-                        window_tail: float = 0.05,):
-        events = []
-        onset_times = sorted(onset_times)
-        n_onsets = len(onset_times)
-        prev_f = None
-
-        for i, onset in enumerate(onset_times):
-            if i < n_onsets -1:
-                t_start = onset
-                t_end = onset_times[i + 1] + window_tail
-            else:
-                t_start = onset
-                t_end = f0_times[-1]  # last onset, look ahead 0.5s
-            
-            mask = (f0_times >= t_start) & (f0_times <= t_end) & voiced_flag
-            if not np.any(mask):
-                continue
-            f0_segment = f0_hz[mask]
-
-            f0_med = float(np.median(f0_segment))
-            if prev_f is not None:
-                f0_med = self._correct_octave_jump(prev_f, f0_med)
-            prev_f = f0_med
-            note, cents = self.freq_to_note(float(f0_med))
-
-            events.append(
-                {
-                    "onset": float(onset),
-                    "pitch": {
-                        "freq": float(f0_med),
-                        "note": note,
-                        "cents": float(cents),
-                    },
-                })
-        
-        return events
-    
-    def _correct_octave_jump(self, prev_freq: float, curr_freq: float):
-        if prev_freq <= 0 or curr_freq <= 0:
-            return curr_freq
-
-        # Bring curr_freq within a factor-of-2 neighborhood of prev_freq
-        while curr_freq > 1.8 * prev_freq:
-            curr_freq /= 2.0
-        while curr_freq < 0.6 * prev_freq:
-            curr_freq *= 2.0
-        return curr_freq
-    
-    def analyze(self, y:np.ndarray):
+    def analyze(self, y: np.ndarray):
+        # 1. Detect Onsets
         onsets = self.detect_onsets(y, sr=self.config.sr)
+        
+        # 2. Detect Pitch (pYIN)
         f0_times, f0_hz, voiced_flag, _ = self.monophonic_f0(y)
+        
+        # 3. Align Pitch to Onsets
         events = self.pitch_at_onsets(onsets, f0_times, f0_hz, voiced_flag)
-        frame_idx = int(onsets * self.config.fps)
+        
+        # 4. (Optional) Frame indices calculation fixed
+        frame_indices = [int(t * self.config.fps) for t in onsets]
+        
         return events
 
 if __name__ == "__main__":
     util = Utilities()
     tracker = NoteTracker(util.config)
-    loaded, music = util.load("data/test/quarter_cmaj.wav")
+    
+    # Ensure output directory exists
+    os.makedirs("output", exist_ok=True)
+    
+    filename = "data/audio_tests/quarter_cmaj.wav"
+    loaded, music = util.load(filename)
+    
     if not loaded:
-        print("Failed to load audio file.")
+        print(f"Failed to load audio file: {filename}")
     else:
         print("Audio file loaded successfully.")
         try:
+            # 1. Preprocess
             processed = util.preprocess(music)
-            aligned = tracker.analyze(processed)
-            for ev in aligned:
+            
+            # 2. Analyze (using the fixed analyze method from previous step)
+            aligned_events = tracker.analyze(processed)
+            
+            # 3. Print results to console
+            print(f"\nDetected {len(aligned_events)} events:")
+            print("-" * 40)
+            for ev in aligned_events:
                 onset = ev["onset"]
                 p = ev["pitch"]
-                print(f"Onset {onset:.3f}s → {p['note']} ({p['freq']:.2f} Hz)")
+                print(f"T={onset:.3f}s | {p['note']:<4} | {p['freq']:6.2f} Hz")
+            
+            # 4. Save to CSV
+            csv_name = f"data/audio_analysis/{os.path.basename(filename).replace('.wav', '.csv')}"
+            util.save_to_csv(aligned_events, csv_name)
+
+            # 5. Visualize
             util.visualize(processed)
+            
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             print(f"An error occurred during analysis: {e}")
