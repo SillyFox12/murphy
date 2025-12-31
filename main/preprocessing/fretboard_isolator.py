@@ -1,12 +1,5 @@
-# -*- coding: utf-8 -*-
 """
-Murphy AI - Fretboard Detector using YOLOv11
-
-This script defines a complete pipeline for training, validating, and using a
-YOLOv11 model to detect guitar fretboards.
-
-Author: Professor (Assisted by Silly Fox Studios)
-Version: 1.1 (Path corrected)
+Not used in prototype, but kept for future use case.
 """
 
 import os
