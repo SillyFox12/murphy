@@ -156,7 +156,14 @@ class TechniqueOrchestrator:
 
 
     def save_model(self, model: TechniqueModel, filepath: str):
-        joblib.dump(model, filepath)
+        """Save only the underlying scikit-learn model for inference compatibility."""
+        joblib.dump(
+    {
+        "model": model.model,
+        "features": self.dataset.base_features
+    },
+    filepath
+)
 
     def plot_feature_importance(self, model: TechniqueModel, top_n: int = 10):
         importances = model.model.feature_importances_
@@ -184,20 +191,19 @@ class TechniqueOrchestrator:
         plt.show()
 
 if __name__ == '__main__':
-    good_tech_files = []
-    bad_tech_files = ["data/processed_hand_data/wrist/raised/raised_wrist.csv", 
-                      "data/processed_hand_data/wrist/caved/caved_wrist.csv"]
+    good_tech_files = ["data/processed_hand_data/thumb/behind/behind_thumb.csv"]
+    bad_tech_files = ["data/processed_hand_data/thumb/high/high_thumb.csv"]
     
     orchestrator = TechniqueOrchestrator(good_tech=good_tech_files,
                                          bad_tech=bad_tech_files,
-                                         part="wrist")  
+                                         part="thumb")  
 
-    wrist_detector, X_test, y_test = orchestrator.train_type_classifier(part="wrist")
-    orchestrator.save_model(wrist_detector, "models/wrist_error_type_detector.pkl") # type: ignore # ignore
+    detector, X_test, y_test = orchestrator.train_detector(part="thumb") 
+    orchestrator.save_model(detector, "models/thumb_error_detector.pkl") # type: ignore
 
-    orchestrator.plot_feature_importance(wrist_detector, top_n=15)
+    orchestrator.plot_feature_importance(detector, top_n=15)
     orchestrator.confusion_matrix(
         y_true=y_test,
-        y_pred=wrist_detector.predict(X_test),
-        labels=[0, 1]
+        y_pred=detector.predict(X_test),
+        labels=sorted(y_test.unique())
     )
