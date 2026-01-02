@@ -53,19 +53,55 @@ class FrameWindowExtractor:
         return start, end
 
 class TechniqueModel:
-    def __init__(self, model_path: str, threshold: float = 0.6):
-        self.model = joblib.load(model_path)
-        self.threshold = threshold
+    def __init__(self, model_path: str):
 
-    def predict_window(self, X_window: pd.DataFrame):
+        bundle = joblib.load(model_path)
+        self.model = bundle["model"]
+        self.feature_cols = bundle["features"]
+
+        # Ensure the model is a binary classifier (most scikit-learn classifiers have .classes_)
+        if not (hasattr(self.model, "classes_") and len(self.model.classes_) == 2):
+            raise ValueError("The loaded model must be a binary scikit-learn classifier with exactly two classes.")
+        
+        # The positive class is always at index 1 (scikit-learn sorts classes_ and aligns probabilities/decisions to it)
+        self.positive_class = self.model.classes_[1]
+
+    def predict_frame(self, X: pd.DataFrame):
         """
         Returns:
-            vote (0/1), confidence (mean prob)
+            vote (0/1), confidence ∈ [0,1]
         """
-        probs = self.model.predict_proba(X_window)[:, 1]
-        confidence = probs.mean()
-        vote = int(confidence >= self.threshold)
-        return vote, confidence
+        if len(X) != 1:
+            raise ValueError("predict_frame expects a DataFrame with exactly one row (a single frame).")
+
+        if hasattr(self.model, "predict_proba"):
+            probs = self.model.predict_proba(X)
+            conf = float(probs[0, 1])  # Probability of the positive class
+            vote = 1 if conf >= 0.5 else 0
+        elif hasattr(self.model, "decision_function"):
+            score = float(self.model.decision_function(X)[0])
+            conf = 1 / (1 + np.exp(-score))  # Sigmoid to approximate probability
+            vote = 1 if conf >= 0.5 else 0
+        elif hasattr(self.model, "predict"):
+            pred = self.model.predict(X)[0]
+            vote = 1 if pred == self.positive_class else 0
+            conf = 1.0
+        else:
+            raise AttributeError("The loaded model has no supported prediction method.")
+
+        return vote, conf
+    
+    def predict_batch(self, X_window: pd.DataFrame):
+        X_feats = X_window[self.feature_cols]
+
+        probs = self.model.predict_proba(X_feats)
+
+        # Binary classifier assumed
+        votes = (probs[:, 1] > 0.5).astype(int)
+        confs = probs[:, 1]
+
+        return votes, confs
+
 
 class MajorityVote:
     def __init__(self, min_ratio: float = 0.6):
@@ -83,6 +119,22 @@ class MajorityVote:
             return 1, ratio
         
         return 0, ratio
+    
+    def decide_weighted(self, votes: np.ndarray, weights: np.ndarray):
+        """
+        votes: 0/1 predictions
+        weights: same length, ≥0
+        """
+        if len(votes) == 0:
+            return 0, 0.0
+
+        weighted_sum = np.sum(votes * weights)
+        weight_total = np.sum(weights)
+
+        ratio = weighted_sum / weight_total if weight_total > 0 else 0.0
+        decision = int(ratio >= self.min_ratio)
+
+        return decision, ratio
 
 class EventFeedbackEngine:
     def __init__(
@@ -100,35 +152,50 @@ class EventFeedbackEngine:
         self.voter = MajorityVote()
         self.models = models
 
-    def evaluate(self):
+    def evaluate(self) -> pd.DataFrame:
         results = []
+
+        feature_cols = [
+            c for c in self.features.columns
+            if c not in ("frame", "hand_index")
+        ]
 
         for _, note_event in self.audio.iterrows():
             onset = note_event["onset"]
             note = note_event["note"]
 
+            # 1️⃣ Extract temporal window
             start, end = self.window.get_window_indices(onset, self.n_frames)
-            frame_slice = self.features.iloc[start:end]
+            frame_slice = self.features.iloc[start:end + 1]
+
+            if frame_slice.empty:
+                continue
+
+            # 2️⃣ Compute temporal weights (per note)
+            frame_indices = np.arange(start, end + 1)
+            center = (start + end) / 2
+            dist = np.abs(frame_indices - center)
+
+            sigma = max(len(frame_indices) / 4, 1e-6)
+            weights = np.exp(-(dist ** 2) / (2 * sigma ** 2))
 
             feedback = {
                 "onset": onset,
                 "note": note,
             }
 
+            # 3️⃣ Model evaluation
             for name, model in self.models.items():
-                frame_votes = []
-                confidences = []
+                X_window = frame_slice[feature_cols]
 
-                for _, frame in frame_slice.iterrows():
-                    X = frame.to_frame().T
-                    vote, conf = model.predict_window(X)
-                    frame_votes.append(vote)
-                    confidences.append(conf)
-
-                decision, ratio = self.voter.decide(frame_votes)
+                votes, confs = model.predict_batch(X_window)
+                decision, ratio = self.voter.decide_weighted(
+                    votes=votes,
+                    weights=weights
+                )
 
                 feedback[f"{name}_error"] = decision
-                feedback[f"{name}_confidence"] = np.mean(confidences)
+                feedback[f"{name}_confidence"] = ratio
 
             results.append(feedback)
 
@@ -139,14 +206,14 @@ if __name__ == "__main__":
     FPS = 30.0
 
     models = {
-        "wrist": TechniqueModel("models/wrist_error_detector.pkl", threshold=0.6),
-        "finger": TechniqueModel("models/finger_error_detector.pkl", threshold=0.6),
-        "thumb": TechniqueModel("models/thumb_error_detector.pkl", threshold=0.6),
+        "wrist": TechniqueModel("models/wrist_error_detector.pkl"),
+        "finger": TechniqueModel("models/finger_error_detector.pkl"),
+        "thumb": TechniqueModel("models/thumb_error_detector.pkl"),
     }
 
     engine = EventFeedbackEngine(
-        features_csv="data/features.csv",
-        audio_csv="data/audio.csv",
+        features_csv="data/test/visual_data/processed/hand_features.csv",
+        audio_csv="data/test/audio_data/processed/slanted_finger.csv",
         fps=FPS,
         models=models
     )
